@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A1v1</title>
+<title>PG Quartermaster A1v2</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -204,7 +204,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v1</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v2</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -1723,7 +1723,7 @@ window.debugFindNpc = function(search) {
 
 /* Convert StorageVault codes to readable names */
 function friendlyVault(v) {
-  if (!v || v === '?') return 'On Person';
+  if (!v || v === '?' || v === 'Saddlebag') return 'On Person';
   if (v.startsWith('NPC_'))             return v.slice(4);
   if (v.startsWith('*AccountStorage_')) return 'Transfer Storage (' + v.slice(16) + ')';
   // split CamelCase: SerbuleCommunityChest → Serbule Community Chest
@@ -3856,7 +3856,7 @@ const AREA_TO_ZONE = {
 
 /* Returns the canonical zone for a raw StorageVault key, or null if unknown/portable */
 function vaultToZone(key) {
-  if (!key || key === '?') return null;
+  if (!key || key === '?' || key === 'Saddlebag') return null;
   const area = VAULT_AREA_MAP[key];
   return area ? (AREA_TO_ZONE[area] || null) : null;
 }
@@ -4301,7 +4301,7 @@ function renderWorkOrdersTab() {
           const showZone = woNpcBarMode === 'zone';
           const parts   = breakdown.map(b => {
             const bZone    = vaultToZone(b.vaultKey);
-            const onPerson = b.vaultKey === '?';
+            const onPerson = b.vaultKey === '?' || b.vaultKey === 'Saddlebag';
             const sameZone = woZone && (onPerson || bZone === woZone) && ((zoneQtyMap[bZone] || 0) + (onPerson ? b.qty : 0)) >= r.qty;
             const style    = sameZone ? 'color:#5fcaaa;font-weight:bold;' : 'color:var(--text-dim);';
             const mark     = sameZone ? ' ✓' : '';
@@ -4310,7 +4310,7 @@ function renderWorkOrdersTab() {
           });
           const tooltip = breakdown.map(b => {
             const bZone    = vaultToZone(b.vaultKey);
-            const onPerson = b.vaultKey === '?';
+            const onPerson = b.vaultKey === '?' || b.vaultKey === 'Saddlebag';
             const sameZone = woZone && (onPerson || bZone === woZone) && ((zoneQtyMap[bZone] || 0) + (onPerson ? b.qty : 0)) >= r.qty;
             const alt      = showZone ? b.vault : (b.zone || b.vault);
             return `${alt}: ${b.qty.toLocaleString()}${sameZone ? ' ← in zone, enough to complete' : ''}`;
@@ -5511,7 +5511,7 @@ function buildRouteData(rows) {
     function _pickupContract() {
       if (!_pendingContract) return;
       const cv = r.contractItem.StorageVault;
-      if (!cv || cv === '?') return;
+      if (!cv || cv === '?' || cv === 'Saddlebag') return;
       const contractZone    = vaultToZone(cv) || 'Unknown';
       const contractVaultName = friendlyVault(cv);
       const contractNl      = (r.contractItem.Name || '').toLowerCase();
@@ -7110,7 +7110,7 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
 
 // isPortableVault used in renderRouteHtml — expose at module scope
 function isPortableVault(b) {
-  return b.vaultKey === '?' || !getZoneForVault(b.vaultKey);
+  return b.vaultKey === '?' || b.vaultKey === 'Saddlebag' || !getZoneForVault(b.vaultKey);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -7253,7 +7253,7 @@ function buildQuestRouteData(rows) {
 
     // ── Fully portable ──
     if (portableQtyOf(nl) >= r.qtyNeeded) {
-      ensureStop(delivZone).deliveries.push({ r, readyNote: 'on person ✓', qty: r.qtyNeeded });
+      ensureStop(delivZone).deliveries.push({ r, readyNote: 'on person / saddlebag ✓', qty: r.qtyNeeded });
       continue;
     }
 
@@ -7759,7 +7759,7 @@ function renderQuestRouteHtml(routeData) {
   orderedZones.forEach(z => {
     const d = stops[z];
     delivCount += d.deliveries.length;
-    readyCount += d.deliveries.filter(dd => dd.readyNote === 'on person ✓').length;
+    readyCount += d.deliveries.filter(dd => dd.readyNote === 'on person / saddlebag ✓').length;
     storageCount += d.deliveries.filter(dd => dd.readyNote === 'from storage' || dd.readyNote === 'picked up here ✓' || dd.readyNote === 'storage + vendor').length;
     craftCount += d.localCrafts.length;
   });
@@ -7911,8 +7911,8 @@ function renderQuestRouteHtml(routeData) {
 
     // Apply filter
     const filteredDeliveries = fAll ? allDeliveries
-      : fReady ? allDeliveries.filter(d => d.readyNote === 'on person ✓')
-      : allDeliveries.filter(d => d.readyNote !== 'on person ✓');
+      : fReady ? allDeliveries.filter(d => d.readyNote === 'on person / saddlebag ✓')
+      : allDeliveries.filter(d => d.readyNote !== 'on person / saddlebag ✓');
 
     const showPickups = !fReady && hasPickups;
     const showCrafts  = !fReady && hasLocalCrafts;
@@ -8008,7 +8008,7 @@ function renderQuestRouteHtml(routeData) {
       lines.push(`<div style="font-size:10px;color:#5fcaaa;font-weight:bold;margin:${(hasPickups || hasLocalCrafts) ? '6' : '0'}px 0 2px;letter-spacing:.3px;">📜 TURN IN:</div>`);
       for (const [npc, delivs] of Object.entries(delivByNpc)) {
         for (const d of delivs) {
-          const isReady = d.readyNote === 'on person ✓' || d.readyNote === 'picked up here ✓' || d.readyNote === 'crafted ✓' || d.readyNote === 'purchased ✓';
+          const isReady = d.readyNote === 'on person / saddlebag ✓' || d.readyNote === 'picked up here ✓' || d.readyNote === 'crafted ✓' || d.readyNote === 'purchased ✓';
           const noteColor = isReady ? '#5fcaaa' : 'var(--text-dim)';
           const borderCol = isReady ? '#5fcaaa' : 'var(--border)';
           lines.push(`<div style="padding:2px 0 2px 8px;margin:1px 0;border-left:2px solid ${borderCol};font-size:12px;">
@@ -8625,7 +8625,7 @@ function renderMissingRecipesTab() {
    Bug Report
    ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
-  const ver = 'A1v1';
+  const ver = 'A1v2';
   const ua = navigator.userAgent;
   const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
   const vp = `${window.innerWidth}x${window.innerHeight}`;
