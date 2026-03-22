@@ -4196,6 +4196,8 @@ function renderWorkOrdersTab() {
                    : '<span style="color:#c45050;font-size:11px;">⚠ Load character JSON for active/completed status</span>'}
     ${!invData ? '<span style="color:var(--text-dim);font-size:11px;">⚠ No inventory loaded</span>' : ''}`;
 
+  const _npcCol = WO_COLS.find(c => c.key === 'npc');
+  if (_npcCol) _npcCol.label = woNpcBarMode === 'zone' ? 'Zone' : 'NPC';
   renderTabHeader('wo', woSortKey, woSortDir, 'woSetSort');
   const _woTbl = document.getElementById('wo-tbl');
   if (_woTbl) _woTbl.style.width = _TC.wo.order.reduce((s, k) => s + tabColW('wo', k), 0) + 'px';
