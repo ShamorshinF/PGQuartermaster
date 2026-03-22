@@ -126,6 +126,14 @@
     font-size:13px;padding:9px 22px;border-radius:4px;display:none;z-index:999;
     pointer-events:none;font-family:Georgia,serif;border:1px solid;white-space:nowrap;}
 
+  /* ── drop zones ── */
+  .file-drop-zone{border:2px dashed var(--border);border-radius:6px;padding:14px 12px;
+    text-align:center;cursor:pointer;transition:all .15s;margin-top:6px;
+    color:var(--text-dim);font-size:12px;font-family:Georgia,serif;}
+  .file-drop-zone:hover{border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.06);}
+  .file-drop-zone.drag-over{border-color:var(--gold);background:rgba(200,168,75,.12);color:var(--gold);
+    box-shadow:0 0 12px rgba(200,168,75,.15);}
+
   /* ── bug report button ── */
   #bug-report-btn{position:fixed;bottom:16px;right:16px;z-index:190;
     font-family:Georgia,serif;font-size:11px;padding:6px 14px;border-radius:5px;
@@ -406,8 +414,8 @@
         <div class="import-card-title">Inventory &amp; Items JSON</div>
         <div class="import-card-desc">Your character's full inventory report from the game. Contains all items across all storage locations.</div>
         <div class="import-card-status" id="import-status-inv">⚠ Not loaded</div>
+        <div class="file-drop-zone" id="inv-drop-zone">📥 Drag &amp; drop your inventory JSON here, or click to browse</div>
       </div>
-      <button class="btn import-card-btn" id="import-btn-inv" onclick="document.getElementById('inv-file-input').click()">📂 Load File</button>
     </div>
 
     <!-- Character JSON -->
@@ -417,8 +425,8 @@
         <div class="import-card-title">Character JSON</div>
         <div class="import-card-desc">Your character sheet — skills, active &amp; completed work orders, and other progression data.</div>
         <div class="import-card-status" id="import-status-char">⚠ Not loaded</div>
+        <div class="file-drop-zone" id="char-drop-zone">📥 Drag &amp; drop your character JSON here, or click to browse</div>
       </div>
-      <button class="btn import-card-btn" id="import-btn-char" onclick="document.getElementById('char-file-input').click()">📂 Load File</button>
     </div>
 
     <div style="font-family:Georgia,serif;font-size:15px;color:var(--gold);margin-top:8px;padding-bottom:6px;border-bottom:1px solid var(--border-dim);">Automatically Pull JSONs from Web</div>
@@ -2945,6 +2953,19 @@ function renderImportsTab() {
     btn.style.borderColor = loaded ? 'var(--green, #3a7d44)' : '#a03030';
     btn.style.color = '#fff';
   }
+  function setDropZoneLoaded(id, loaded) {
+    const dz = document.getElementById(id);
+    if (!dz) return;
+    if (loaded) {
+      dz.style.borderColor = '#3a7d44';
+      dz.style.color = '#7ec450';
+      dz.innerHTML = '✅ Loaded — drop a new file to replace';
+    } else {
+      dz.style.borderColor = '';
+      dz.style.color = '';
+      dz.innerHTML = '📥 Drag &amp; drop your JSON here, or click to browse';
+    }
+  }
 
   // Inventory
   if (invData && invData.Items) {
@@ -2952,9 +2973,11 @@ function renderImportsTab() {
       `✅ ${invData.Items.length.toLocaleString()} items loaded · ${invData.Character || 'unknown character'}`,
       'ok');
     setImportBtn('import-btn-inv', true);
+    setDropZoneLoaded('inv-drop-zone', true);
   } else {
     setStatus('import-status-inv', '⚠ Not loaded — load your items report JSON from the game', 'warn');
     setImportBtn('import-btn-inv', false);
+    setDropZoneLoaded('inv-drop-zone', false);
   }
 
   // Character
@@ -2966,9 +2989,11 @@ function renderImportsTab() {
       ` · ${(charData.ActiveWorkOrders || []).length} active work orders`,
       'ok');
     setImportBtn('import-btn-char', true);
+    setDropZoneLoaded('char-drop-zone', true);
   } else {
     setStatus('import-status-char', '⚠ Not loaded — load your character sheet JSON from the game', 'warn');
     setImportBtn('import-btn-char', false);
+    setDropZoneLoaded('char-drop-zone', false);
   }
 
   // Quest data
