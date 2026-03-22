@@ -7147,10 +7147,45 @@ function buildQuestRouteData(rows) {
     return stops[zone];
   }
 
+  // ── Pre-pass: group by quest and check if ALL items are available ──
+  const questRows = {};  // questId → [row, ...]
+  for (const r of rows) {
+    const qid = r.questId || r.internalName || r.questName;
+    if (!questRows[qid]) questRows[qid] = [];
+    questRows[qid].push(r);
+  }
+  const questBlocked = {};  // questId → [missing item descriptions]
+  for (const [qid, qRows] of Object.entries(questRows)) {
+    if (qRows.length < 2) continue;  // single-item quests always fine
+    const missing = [];
+    for (const r of qRows) {
+      const nl = r.itemDisplay.toLowerCase();
+      const breakdown = getInvBreakdown(nl);
+      const totalQty = breakdown.reduce((s, b) => s + b.qty, 0);
+      if (totalQty < r.qtyNeeded) {
+        missing.push(totalQty > 0
+          ? `${r.itemDisplay} (have ${totalQty}/${r.qtyNeeded})`
+          : `${r.itemDisplay} (need ${r.qtyNeeded})`);
+      }
+    }
+    if (missing.length) questBlocked[qid] = missing;
+  }
+
   for (const r of rows) {
     const nl = r.itemDisplay.toLowerCase();
     const npcZone = questResolveZone(r);
     if (!npcZone) { unavailable.push({ r, reason: 'unknown NPC zone' }); continue; }
+
+    // If any item for this quest is missing, skip all items for it
+    const qid = r.questId || r.internalName || r.questName;
+    if (questBlocked[qid]) {
+      const others = questBlocked[qid].filter(m => !m.startsWith(r.itemDisplay + ' ('));
+      const reason = others.length
+        ? `also need: ${others.join(', ')}`
+        : `need ${r.qtyNeeded}, not in inventory`;
+      unavailable.push({ r, reason });
+      continue;
+    }
 
     // Check inventory
     const breakdown = getInvBreakdown(nl);
