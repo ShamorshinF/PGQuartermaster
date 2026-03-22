@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A1v2</title>
+<title>PG Quartermaster A1v3</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -204,7 +204,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v2</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v3</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -1916,8 +1916,6 @@ async function loadGameData() {
     IDB.putGameKV('itemKeyByName',    itemKeyByName);
     IDB.putGameKV('codeToInternal',   codeToInternal);
     IDB.putGameKV('keywordToItems',   kwToItems);
-
-    render();
 
     toast(`Game data loaded: ${count.toLocaleString()} items (v${version})`);
     renderImportsTab();
@@ -8549,7 +8547,7 @@ function renderMissingRecipesTab() {
       <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-top:20px;margin-bottom:10px;">Table Tips</div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
         <strong style="color:var(--text);">Column headers</strong> <span>Click to sort by name, skill, level, trainer, zone, or favor.</span>
-        <strong style="color:var(--text);">Recipe names</strong> <span>Link to that skill's complete recipe list on the wiki.</span>
+        <strong style="color:var(--text);">Recipe names</strong> <span>Link to the item's wiki page.</span>
         <strong style="color:var(--text);">Trainer names</strong> <span>Link to the NPC's wiki page so you can find them.</span>
         <strong style="color:var(--text);">Your Favor</strong> <span>Shows your current favor level with the trainer, color-coded. Note: required favor is not in public data — check the wiki or in-game.</span>
       </div>
@@ -8583,7 +8581,7 @@ function renderMissingRecipesTab() {
       <span style="display:block;margin-top:5px;">Some recipes listed here may be obtained through <strong style="color:#a89040;">hangouts</strong> rather than direct training, and may not appear in a trainer's shop.</span>
     </div>
     <div style="margin:6px 14px 2px;padding:8px 12px;background:#121820;border:1px solid #1e3050;border-radius:4px;font-size:11px;color:#5a8ab0;line-height:1.6;">
-      🔗 <strong style="color:#7aaad0;">Recipe names</strong> link to that skill's complete recipe list on the wiki &nbsp;·&nbsp; <strong style="color:#7aaad0;">Skill names</strong> link to the skill's wiki page &nbsp;·&nbsp; <strong style="color:#7aaad0;">Trainer names</strong> link to that NPC's wiki page.
+      🔗 <strong style="color:#7aaad0;">Recipe names</strong> link to the item's wiki page &nbsp;·&nbsp; <strong style="color:#7aaad0;">Skill names</strong> link to the skill's wiki page &nbsp;·&nbsp; <strong style="color:#7aaad0;">Trainer names</strong> link to that NPC's wiki page.
     </div>`;
 
   if (!sortable.length) {
@@ -8599,7 +8597,7 @@ function renderMissingRecipesTab() {
       const pf    = t ? playerFavorLevel(t.npcKey) : null;
       const pfColor = pf ? (FAVOR_COLOR[pf] || 'var(--text-dim)') : '#555';
       return `<tr style="border-bottom:1px solid #1e1a14;">
-        <td style="padding:5px 10px;font-size:12px;color:var(--text);">${(() => { const sw = encodeURIComponent(r.skill.replace(/ /g,'_')); return `<a href="https://wiki.projectgorgon.com/wiki/${sw}#${sw}_Complete_Recipe_List" target="_blank" style="color:var(--text);text-decoration:underline;text-underline-offset:2px;">${esc(r.name)}</a>`; })()}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text);">${(() => { const nw = encodeURIComponent(r.name.replace(/ /g,'_')); return `<a href="https://wiki.projectgorgon.com/wiki/${nw}" target="_blank" style="color:var(--text);text-decoration:underline;text-underline-offset:2px;">${esc(r.name)}</a>`; })()}</td>
         <td style="padding:5px 10px;font-size:11px;color:var(--text-dim);white-space:nowrap;"><a href="https://wiki.projectgorgon.com/wiki/${encodeURIComponent(r.skill.replace(/ /g,'_'))}" target="_blank" style="color:var(--text-dim);text-decoration:underline;text-underline-offset:2px;">${esc(r.skill)}</a> <span style="color:#555;font-size:10px;">(${r.charLevel})</span></td>
         <td style="padding:5px 10px;font-size:11px;color:var(--text-dim);text-align:center;">${r.reqLevel || '—'}</td>
         <td style="padding:5px 10px;font-size:11px;color:var(--text);white-space:nowrap;">${t ? `<a href="https://wiki.projectgorgon.com/wiki/${encodeURIComponent(t.name.replace(/ /g,'_'))}" target="_blank" style="color:var(--text);text-decoration:underline;text-underline-offset:2px;">${esc(t.name)}</a>` : '<span style="color:#444;font-style:italic;">—</span>'}</td>
@@ -8625,7 +8623,7 @@ function renderMissingRecipesTab() {
    Bug Report
    ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
-  const ver = 'A1v2';
+  const ver = 'A1v3';
   const ua = navigator.userAgent;
   const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
   const vp = `${window.innerWidth}x${window.innerHeight}`;
