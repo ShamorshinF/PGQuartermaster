@@ -7599,44 +7599,54 @@ function renderMissingRecipesTab() {
       </table>
     </div>`;
 }
-</script>
 
-<button id="bug-report-btn" onclick="submitBugReport()" title="Report a bug — generates a debug report and opens GitHub Issues">🐛 Report Bug</button>
-
-<script>
+/* ═══════════════════════════════════════════════════════
+   Bug Report
+   ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
   const ver = 'A0v7';
   const ua = navigator.userAgent;
-  const screen = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
-  const viewport = `${window.innerWidth}x${window.innerHeight}`;
+  const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
+  const vp = `${window.innerWidth}x${window.innerHeight}`;
   const now = new Date().toISOString();
 
   // Data status
-  const hasInv   = !!(window.invData && invData.Items);
-  const hasChar  = !!window.charData;
-  const hasQuest = !!window.questsData;
-  const hasGame  = !!window.gameData;
+  const hasInv   = !!(invData && invData.Items);
+  const hasChar  = !!charData;
+  const hasQuest = !!questsData;
+  const hasGame  = !!gameData;
   const itemCount = hasInv ? invData.Items.length : 0;
   const skillCount = hasChar && charData.Skills ? Object.keys(charData.Skills).length : 0;
   const recipeCount = hasGame && gameData.recipes ? Object.keys(gameData.recipes).length : 0;
+  const woRowCount = (_lastWoRows || []).length;
 
-  // Active tab & filters
+  // Active tab
   const activeTab = document.querySelector('.tab-btn[style*="border-bottom"]')?.textContent?.trim() || '?';
-  const woCount = (window._lastWoRows || []).length;
-  const filterState = [];
-  if (window.woHaveItem) filterState.push('haveItem');
-  if (window.woCanCraftAll) filterState.push('canCraft');
-  if (window.woHaveContract) filterState.push('haveContract');
-  if (window.woWithinMyLevel) filterState.push('withinLevel');
-  if (window._routeNoCrafting) filterState.push('noCrafting');
-  if (window._routeNoPurchases) filterState.push('noPurchases');
 
-  // IDB store sizes
-  let idbInfo = 'unknown';
-  try {
-    const stores = ['pg_inventory_v2','pg_character_v2','pg_quests_v2','pg_gamedata_v2'];
-    idbInfo = stores.map(s => s.replace('pg_','').replace('_v2','')).join(', ');
-  } catch(e) {}
+  // Active filters
+  const filters = [];
+  if (woHaveItem) filters.push('haveItem');
+  if (woCanCraftAll) filters.push('canCraft');
+  if (woHaveContract) filters.push('haveContract');
+  if (woWithinMyLevel) filters.push('withinLevel');
+  if (woCanBuyAll) filters.push('canBuy');
+  if (woItemInZone) filters.push('itemInZone');
+  if (woCraftStatusFilter.size) filters.push('craftStatus:' + [...woCraftStatusFilter].join(','));
+  if (woHideCraftable) filters.push('hideCraftable');
+  if (woNpcFilter.size) filters.push('npcFilter:' + woNpcFilter.size);
+  if (_routeNoCrafting) filters.push('noCrafting');
+  if (_routeNoPurchases) filters.push('noPurchases');
+
+  // Skills summary
+  let skillsSummary = '—';
+  if (hasChar && charData.Skills) {
+    const top = Object.entries(charData.Skills)
+      .sort((a, b) => (b[1].Level || 0) - (a[1].Level || 0))
+      .slice(0, 8)
+      .map(([k, v]) => `${k} ${v.Level}`)
+      .join(', ');
+    skillsSummary = top;
+  }
 
   const debugReport = [
     '## Debug Report',
@@ -7644,16 +7654,17 @@ function submitBugReport() {
     '|-------|-------|',
     `| Version | ${ver} |`,
     `| Timestamp | ${now} |`,
-    `| Browser | ${ua} |`,
-    `| Screen | ${screen} |`,
-    `| Viewport | ${viewport} |`,
+    `| Browser | \`${ua}\` |`,
+    `| Screen | ${scr} |`,
+    `| Viewport | ${vp} |`,
     `| Inventory loaded | ${hasInv} (${itemCount} items) |`,
     `| Character loaded | ${hasChar} (${skillCount} skills) |`,
+    `| Top skills | ${skillsSummary} |`,
     `| Quests loaded | ${hasQuest} |`,
     `| Game data loaded | ${hasGame} (${recipeCount} recipes) |`,
     `| Active tab | ${activeTab} |`,
-    `| WO rows | ${woCount} |`,
-    `| Active filters | ${filterState.join(', ') || 'none'} |`,
+    `| WO rows displayed | ${woRowCount} |`,
+    `| Active filters | ${filters.join(', ') || 'none'} |`,
   ].join('\n');
 
   const issueTitle = encodeURIComponent('Bug: ');
@@ -7669,7 +7680,10 @@ function submitBugReport() {
   const url = `https://github.com/ShamorshinF/PGQuartermaster/issues/new?title=${issueTitle}&body=${issueBody}`;
   window.open(url, '_blank');
 }
+
 </script>
+
+<button id="bug-report-btn" onclick="submitBugReport()" title="Report a bug — generates a debug report and opens GitHub Issues">🐛 Report Bug</button>
 
 </body>
 </html>
