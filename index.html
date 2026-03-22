@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A0v6</title>
+<title>PG Quartermaster A0v7</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -126,6 +126,13 @@
     font-size:13px;padding:9px 22px;border-radius:4px;display:none;z-index:999;
     pointer-events:none;font-family:Georgia,serif;border:1px solid;white-space:nowrap;}
 
+  /* ── bug report button ── */
+  #bug-report-btn{position:fixed;bottom:16px;right:16px;z-index:190;
+    font-family:Georgia,serif;font-size:11px;padding:6px 14px;border-radius:5px;
+    cursor:pointer;border:1px solid #c04040;background:rgba(30,20,10,.92);color:#e06c75;
+    box-shadow:0 2px 8px rgba(0,0,0,.4);transition:all .15s;display:flex;align-items:center;gap:5px;}
+  #bug-report-btn:hover{background:rgba(192,64,64,.18);border-color:#e06c75;color:#ff9999;}
+
   ::-webkit-scrollbar{width:6px;height:6px;}
   ::-webkit-scrollbar-track{background:#1a1510;}
   ::-webkit-scrollbar-thumb{background:#4a3d28;border-radius:3px;}
@@ -182,7 +189,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A0v6</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A0v7</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -7591,6 +7598,76 @@ function renderMissingRecipesTab() {
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+}
+</script>
+
+<button id="bug-report-btn" onclick="submitBugReport()" title="Report a bug — generates a debug report and opens GitHub Issues">🐛 Report Bug</button>
+
+<script>
+function submitBugReport() {
+  const ver = 'A0v7';
+  const ua = navigator.userAgent;
+  const screen = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
+  const viewport = `${window.innerWidth}x${window.innerHeight}`;
+  const now = new Date().toISOString();
+
+  // Data status
+  const hasInv   = !!(window.invData && invData.Items);
+  const hasChar  = !!window.charData;
+  const hasQuest = !!window.questsData;
+  const hasGame  = !!window.gameData;
+  const itemCount = hasInv ? invData.Items.length : 0;
+  const skillCount = hasChar && charData.Skills ? Object.keys(charData.Skills).length : 0;
+  const recipeCount = hasGame && gameData.recipes ? Object.keys(gameData.recipes).length : 0;
+
+  // Active tab & filters
+  const activeTab = document.querySelector('.tab-btn[style*="border-bottom"]')?.textContent?.trim() || '?';
+  const woCount = (window._lastWoRows || []).length;
+  const filterState = [];
+  if (window.woHaveItem) filterState.push('haveItem');
+  if (window.woCanCraftAll) filterState.push('canCraft');
+  if (window.woHaveContract) filterState.push('haveContract');
+  if (window.woWithinMyLevel) filterState.push('withinLevel');
+  if (window._routeNoCrafting) filterState.push('noCrafting');
+  if (window._routeNoPurchases) filterState.push('noPurchases');
+
+  // IDB store sizes
+  let idbInfo = 'unknown';
+  try {
+    const stores = ['pg_inventory_v2','pg_character_v2','pg_quests_v2','pg_gamedata_v2'];
+    idbInfo = stores.map(s => s.replace('pg_','').replace('_v2','')).join(', ');
+  } catch(e) {}
+
+  const debugReport = [
+    '## Debug Report',
+    '| Field | Value |',
+    '|-------|-------|',
+    `| Version | ${ver} |`,
+    `| Timestamp | ${now} |`,
+    `| Browser | ${ua} |`,
+    `| Screen | ${screen} |`,
+    `| Viewport | ${viewport} |`,
+    `| Inventory loaded | ${hasInv} (${itemCount} items) |`,
+    `| Character loaded | ${hasChar} (${skillCount} skills) |`,
+    `| Quests loaded | ${hasQuest} |`,
+    `| Game data loaded | ${hasGame} (${recipeCount} recipes) |`,
+    `| Active tab | ${activeTab} |`,
+    `| WO rows | ${woCount} |`,
+    `| Active filters | ${filterState.join(', ') || 'none'} |`,
+  ].join('\n');
+
+  const issueTitle = encodeURIComponent('Bug: ');
+  const issueBody = encodeURIComponent(
+    '## Description\n' +
+    '_Describe what happened and what you expected to happen._\n\n' +
+    '## Steps to Reproduce\n' +
+    '1. \n2. \n3. \n\n' +
+    '---\n' +
+    debugReport + '\n'
+  );
+
+  const url = `https://github.com/ShamorshinF/PGQuartermaster/issues/new?title=${issueTitle}&body=${issueBody}`;
+  window.open(url, '_blank');
 }
 </script>
 
