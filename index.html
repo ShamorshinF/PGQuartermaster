@@ -5321,26 +5321,20 @@ function buildRouteData(rows) {
     const craftStatus = invData ? getCraftStatus(r.nl, r.qty, globalReserved) : null;
     const delivZone   = r.zone || 'Unknown';
 
-    // ── Pick up contract from storage only if this order will actually be completable ──
-    if (r.contractItem && !r.isActive && !_routeSkipRequired.has(r.nl)) {
+    // ── Contract pickup helper — called after a fulfillment path succeeds ──
+    // Deferred from the old eager approach: we only pick up contracts for items
+    // that actually get routed (not speculatively based on craftStatus).
+    const _pendingContract = r.contractItem && !r.isActive && !_routeSkipRequired.has(r.nl);
+    function _pickupContract() {
+      if (!_pendingContract) return;
       const cv = r.contractItem.StorageVault;
-      if (cv && cv !== '?') {
-        const _vik = gameItemKeyByName[r.nl];
-        const canFulfill = portableQtyOf(r.nl) >= r.qty
-          || (_routeBought.has(r.nl) && !(_routeBoughtDisplay[r.nl] || {}).isIngredient)
-          || (craftStatus === 'gold' && !_routeNoCrafting)
-          || (craftStatus === 'green' && !_routeNoPurchases && !_routeNoCrafting)
-          || (invData && adjTotal(r.nl) >= r.qty)
-          || (_vik && !_routeNoPurchases && !VENDOR_PURCHASE_BLOCKLIST.has(r.nl) && (itemVendorsMap[_vik] || []).some(v => !v.isBarter));
-        if (canFulfill) {
-          const contractZone    = vaultToZone(cv) || 'Unknown';
-          const contractVaultName = friendlyVault(cv);
-          const contractNl      = (r.contractItem.Name || '').toLowerCase();
-          const st = ensureStop(contractZone);
-          st.pickups.push({ name: r.contractItem.Name, nameLower: contractNl, qty: 1, vault: contractVaultName, forItem: r.name, isIngredient: false, isContract: true });
-          st.isGather = true;
-        }
-      }
+      if (!cv || cv === '?') return;
+      const contractZone    = vaultToZone(cv) || 'Unknown';
+      const contractVaultName = friendlyVault(cv);
+      const contractNl      = (r.contractItem.Name || '').toLowerCase();
+      const st = ensureStop(contractZone);
+      st.pickups.push({ name: r.contractItem.Name, nameLower: contractNl, qty: 1, vault: contractVaultName, forItem: r.name, isIngredient: false, isContract: true });
+      st.isGather = true;
     }
 
     // ── Fully portable or already purchased from vendor ─────────────────────
@@ -5359,6 +5353,7 @@ function buildRouteData(rows) {
           vendorNeededItems.push({ name: r.name, nl: r.nl, qty: r.buyAmount || r.qty, vendors: _bvendors, contractName: r.contractName || `Work Order for ${r.name}`, isBought: true });
         }
       }
+      _pickupContract();
       continue;
     }
 
@@ -5588,6 +5583,7 @@ function buildRouteData(rows) {
             }
           }
         }
+        _pickupContract();
         continue;
       } // end if (plan.canFulfill && plan.steps.length)
       // buildCraftPlan failed — fall through to craft-alt path below
@@ -5718,7 +5714,7 @@ function buildRouteData(rows) {
         _greenHandled = true;
         break; // use first viable recipe
       }
-      if (_greenHandled) continue;
+      if (_greenHandled) { _pickupContract(); continue; }
     }
 
     // ── Items in storage ────────────────────────────────────────────────────
@@ -5741,6 +5737,7 @@ function buildRouteData(rows) {
         }
         ensureStop(delivZone).deliveries.push({ r, readyNote: allLocal ? 'picked up here ✓' : 'from storage' });
         commitReservation(r.nl, r.qty);
+        _pickupContract();
         continue;
       }
       // Partial storage — some in storage, but not enough. If vendor-purchasable, split.
@@ -5763,6 +5760,7 @@ function buildRouteData(rows) {
           vendorNeededItems.push({ name: r.name, nl: r.nl, qty: shortfall, vendors, contractName: r.contractName || `Work Order for ${r.name}` });
           ensureStop(delivZone).deliveries.push({ r, readyNote: 'storage + vendor' });
           commitReservation(r.nl, totalAll); // reserve only the storage portion
+          _pickupContract();
           continue;
         }
       }
@@ -5788,6 +5786,7 @@ function buildRouteData(rows) {
         if (!isSkipped) {
           ensureStop(delivZone).deliveries.push({ r, readyNote: 'buy from vendor' });
           vendorNeededItems.push({ name: r.name, nl: r.nl, qty: r.buyAmount || r.qty, vendors, contractName: r.contractName || `Work Order for ${r.name}`, isAbandonedFallback });
+          _pickupContract();
           continue;
         } else {
           // Skipped — keep in vendorNeededItems for display (greyed out), but don't route
