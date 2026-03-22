@@ -5952,7 +5952,10 @@ function buildRouteData(rows) {
             continue;
           }
         }
-        const isSkipped = _routeSkipRequired.has(r.nl);
+        // Check if explicitly skipped OR if every vendor zone has been individually skipped
+        const vendorZones = vendors.map(v => v.zone).filter(z => z && z !== '—');
+        const allVendorZonesSkipped = vendorZones.length > 0 && vendorZones.every(z => _routeSkipVendor.has(r.nl + '|' + z));
+        const isSkipped = _routeSkipRequired.has(r.nl) || allVendorZonesSkipped;
         if (!isSkipped) {
           ensureStop(delivZone).deliveries.push({ r, readyNote: 'buy from vendor' });
           vendorNeededItems.push({ name: r.name, nl: r.nl, qty: r.buyAmount || r.qty, vendors, contractName: r.contractName || `Work Order for ${r.name}`, isAbandonedFallback });
