@@ -7706,9 +7706,14 @@ function submitBugReport() {
   window.open(url, '_blank');
 }
 
+// Wire up bug report button
+document.addEventListener('DOMContentLoaded', () => {
+  const bugBtn = document.getElementById('bug-report-btn');
+  if (bugBtn) bugBtn.addEventListener('click', submitBugReport);
+});
 </script>
 
-<button id="bug-report-btn" onclick="submitBugReport()" title="Report a bug — generates a debug report and opens GitHub Issues">🐛 Report Bug</button>
+<button id="bug-report-btn" title="Report a bug — generates a debug report and opens GitHub Issues">🐛 Report Bug</button>
 
 </body>
 </html>
