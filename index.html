@@ -35,6 +35,13 @@
   .tab-btn.debug-tab:hover{color:#c08858;background:rgba(200,100,30,.06);}
   .tab-btn.debug-tab.debug-active{color:#e08858;box-shadow:inset 0 -2px 0 #e08858;background:rgba(200,100,30,.09);}
   @keyframes imports-flash{0%,100%{color:#e06c75;box-shadow:inset 0 -2px 0 #e06c75;}50%{color:var(--text-dim);box-shadow:inset 0 -2px 0 transparent;}}
+  @keyframes wo-guide-pulse{0%,100%{background:rgba(58,125,68,.25);border-color:#3a7d44;}50%{background:rgba(58,125,68,.45);border-color:#5fcaaa;}}
+  .guide-header.guide-new{animation:wo-guide-pulse 1.5s ease-in-out infinite;background:rgba(58,125,68,.25);border:2px solid #3a7d44;border-radius:6px;margin:6px 12px;padding:12px 20px !important;}
+  .guide-header.guide-new span{color:#7ec450;}
+  .guide-header.guide-new .guide-hint{color:#5fcaaa;}
+  .guide-header.guide-opened{border:none;margin:0;border-radius:0;}
+  .guide-header.guide-opened span{color:var(--gold);}
+  .guide-header.guide-opened .guide-hint{color:var(--text-dim);}
   .tab-btn.imports-flash{animation:imports-flash 1s step-start infinite;}
   .tab-btn.imports-flash:hover{color:#e88a94;background:rgba(224,108,117,.06);}
   .tab-btn.needs-import{color:#e06c75;box-shadow:inset 0 -2px 0 #e06c75;}
@@ -225,6 +232,52 @@
 
 <!-- ═══════════════════════════ QUESTS VIEW ═══════════════════════════ -->
 <div id="view-quests">
+
+  <!-- Quest Feature Guide (collapsible) -->
+
+  <div id="quests-guide" style="border-bottom:1px solid var(--border-dim);background:rgba(200,168,75,.04);">
+    <div id="quests-guide-header" onclick="const b=document.getElementById('quests-guide-body');const a=this.querySelector('.guide-arrow');const h=this;if(b.style.display==='none'){b.style.display='block';a.textContent='▾';h.classList.remove('guide-new');h.classList.add('guide-opened');localStorage.setItem('pg_quests_guide_seen','1');}else{b.style.display='none';a.textContent='▸';}"
+         class="guide-header guide-new"
+         style="display:flex;align-items:center;gap:10px;padding:10px 18px;cursor:pointer;user-select:none;">
+      <span class="guide-arrow" style="font-size:13px;transition:transform .15s;">▸</span>
+      <span style="font-size:14px;font-family:Georgia,serif;letter-spacing:.5px;">How to use Quests</span>
+      <span class="guide-hint" style="font-size:11px;font-style:italic;">(click to expand)</span>
+    </div>
+    <div id="quests-guide-body" style="display:none;padding:6px 28px 24px;font-size:13px;color:var(--text-dim);line-height:1.9;">
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-bottom:14px;">Views</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px 24px;max-width:860px;">
+        <div style="padding:12px 16px;border:1px solid var(--border-dim);border-radius:6px;background:rgba(200,168,75,.04);">
+          <div style="font-size:15px;margin-bottom:6px;"><strong style="color:var(--gold);">🟡 My Active Quests</strong></div>
+          <div>Shows only delivery quests currently in your quest log.</div>
+        </div>
+        <div style="padding:12px 16px;border:1px solid var(--border-dim);border-radius:6px;background:rgba(200,168,75,.04);">
+          <div style="font-size:15px;margin-bottom:6px;"><strong style="color:var(--gold);">✅ Items Available</strong></div>
+          <div>Shows quests where you already have the required item in storage — ready to turn in.</div>
+        </div>
+        <div style="padding:12px 16px;border:1px solid var(--border-dim);border-radius:6px;background:rgba(200,168,75,.04);">
+          <div style="font-size:15px;margin-bottom:6px;"><strong style="color:var(--gold);">📋 Deliver Quests</strong></div>
+          <div>Browse all known delivery quests in the game, whether active or not.</div>
+        </div>
+      </div>
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-top:20px;margin-bottom:10px;">Features</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+        <strong style="color:var(--text);">🗺 Plan Route</strong> <span>Generates an optimized route for completing your active delivery quests, grouping stops by zone.</span>
+        <strong style="color:var(--text);">📌 Active Pinned</strong> <span>Pins your active quests to the top of the list so they're always visible.</span>
+        <strong style="color:var(--text);">👁 Show Hidden</strong> <span>Reveals quests you've previously hidden. Use the checkbox column to hide completed quests.</span>
+        <strong style="color:var(--text);">Search</strong> <span>Filter by quest name, item name, NPC, or zone.</span>
+      </div>
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-top:20px;margin-bottom:10px;">Table Tips</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+        <strong style="color:var(--text);">Column headers</strong> <span>Click to sort by that column.</span>
+        <strong style="color:var(--text);">Hide checkbox</strong> <span>Check the box on the far right to hide a quest you've already completed. Only available when viewing "Items Available" or "Deliver Quests" — can't hide while filtering by active quests.</span>
+      </div>
+
+    </div>
+  </div>
+
   <div style="margin:10px 12px 0;padding:8px 12px;background:rgba(200,168,75,.06);border:1px solid var(--border-dim);border-radius:4px;font-size:12px;color:var(--text-dim);line-height:1.6;">ℹ️ It is currently impossible to pull a list of all completed quests from imported character data, therefore the quest list may show quests you have already completed. Quests can be hidden from the list by checking the box in the column on the far right.</div>
   <div style="margin:6px 12px 0;padding:8px 12px;background:rgba(200,168,75,.04);border:1px solid var(--border-dim);border-radius:4px;font-size:12px;color:var(--text-dim);line-height:1.6;">⚠️ Quests tagged as "Collect" have been excluded from this list, as they typically require you to harvest or gather items in the world rather than purchase them. However, the game's quest tagging is sometimes inconsistent — some purchasable delivery quests may have been excluded, and some harvest quests may appear in the list.</div>
 
@@ -245,9 +298,11 @@
     <button class="btn" id="quests-fetch-btn" style="font-size:11px;padding:4px 12px;margin-left:auto;"
             onclick="fetchQuestsData()">⬇ Fetch Quest Data</button>
   </div>
-  <div style="display:flex;justify-content:center;padding:8px 0 4px;">
-    <button class="btn" id="quests-route-btn" style="font-size:15px;padding:10px 36px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.1);border-radius:5px;cursor:pointer;font-family:Georgia,serif;letter-spacing:.5px;"
-            onclick="openQuestRouteModal()">🗺 Plan Route</button>
+  <div style="display:flex;justify-content:center;padding:12px 0 8px;">
+    <button class="btn" id="quests-route-btn" style="font-size:22px;font-weight:bold;padding:20px 56px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);border-radius:6px;cursor:pointer;font-family:Georgia,serif;letter-spacing:1px;line-height:1.2;"
+            onclick="openQuestRouteModal()">🗺 Plan Route
+      <div style="font-size:11px;font-weight:normal;opacity:0.7;margin-top:4px;">Groups stops by NPC &amp; zone</div>
+    </button>
   </div>
 
   <div class="quest-stats-bar" id="quests-stats-bar" style="display:none"></div>
@@ -275,6 +330,68 @@
 <!-- ═══════════════════════════ WORK ORDERS VIEW ═══════════════════════════ -->
 <div id="view-workorders" style="display:block;">
 
+  <!-- Feature Guide (collapsible) -->
+  <div id="wo-guide" style="border-bottom:1px solid var(--border-dim);background:rgba(200,168,75,.04);">
+    <div id="wo-guide-header" onclick="const b=document.getElementById('wo-guide-body');const a=this.querySelector('.guide-arrow');const h=this;if(b.style.display==='none'){b.style.display='block';a.textContent='▾';h.classList.remove('guide-new');h.classList.add('guide-opened');localStorage.setItem('pg_wo_guide_seen','1');}else{b.style.display='none';a.textContent='▸';}"
+         class="guide-header guide-new"
+         style="display:flex;align-items:center;gap:10px;padding:10px 18px;cursor:pointer;user-select:none;">
+      <span class="guide-arrow" style="font-size:13px;transition:transform .15s;">▸</span>
+      <span style="font-size:14px;font-family:Georgia,serif;letter-spacing:.5px;">How to use Work Orders</span>
+      <span class="guide-hint" style="font-size:11px;font-style:italic;">(click to expand)</span>
+    </div>
+    <div id="wo-guide-body" style="display:none;padding:6px 28px 24px;font-size:13px;color:var(--text-dim);line-height:1.9;">
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-bottom:14px;">Main Actions</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 32px;max-width:860px;">
+        <div style="padding:12px 16px;border:1px solid var(--border-dim);border-radius:6px;background:rgba(200,168,75,.04);">
+          <div style="font-size:15px;margin-bottom:6px;"><strong style="color:var(--gold);">🚚 Plan Route</strong></div>
+          <div>The main feature. Generates an optimized multi-stop route telling you where to go, what to pick up, what to craft, and where to turn in. <strong style="color:var(--text);">Start here.</strong></div>
+        </div>
+        <div style="padding:12px 16px;border:1px solid var(--border-dim);border-radius:6px;background:rgba(200,168,75,.04);">
+          <div style="font-size:15px;margin-bottom:6px;"><strong style="color:var(--gold);">🛒 Shopping List</strong></div>
+          <div>Shows every item you need across all completable work orders, with storage shortfalls and sub-ingredient breakdowns.</div>
+        </div>
+        <div style="padding:12px 16px;border:1px solid var(--border-dim);border-radius:6px;background:rgba(200,168,75,.04);">
+          <div style="font-size:15px;margin-bottom:6px;"><strong style="color:var(--gold);">🔍 Filtered List</strong></div>
+          <div>Same as Shopping List but scoped to only the work orders currently visible in the table after your filters.</div>
+        </div>
+        <div style="padding:12px 16px;border:1px solid var(--border-dim);border-radius:6px;background:rgba(200,168,75,.04);">
+          <div style="font-size:15px;margin-bottom:6px;"><strong style="color:var(--gold);">🔄 Update Character</strong></div>
+          <div>Re-imports your latest inventory and character data from the game's Reports folder without leaving this tab.</div>
+        </div>
+      </div>
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-top:20px;margin-bottom:10px;">Filters</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+        <strong style="color:var(--text);">📜 Have Contract</strong> <span>Only show orders you hold the contract for or have as an active quest.</span>
+        <strong style="color:var(--text);">🎯 Within My Level</strong> <span>Hide orders above your character's current Industry level.</span>
+        <strong style="color:var(--text);">📍 Item in Zone</strong> <span>Show only orders where the required item is stored in the same zone as the NPC.</span>
+        <strong style="color:var(--text);">🛒 Requires NPC Purchases</strong> <span>Include orders where items must be bought from NPC vendors.</span>
+        <strong style="color:var(--text);">Ind. Lvl slider</strong> <span>Narrow the displayed orders to a specific Industry level range.</span>
+      </div>
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-top:20px;margin-bottom:10px;">Craft Status Buttons</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">These color-coded buttons filter work orders by whether you can craft the required item:</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+        <strong style="color:var(--gold);">✓ Ready</strong> <span>You have the skill, recipe, and all ingredients in storage. Good to go.</span>
+        <strong style="color:#b8c870;">◑ NPC Buy</strong> <span>You have the skill and recipe, but some ingredients need to be purchased from an NPC vendor.</span>
+        <strong style="color:#5fcaaa;">⚗ Partial</strong> <span>You know the recipe and have the skill, but are missing some ingredients (not vendor-purchasable).</span>
+        <strong style="color:#90c0f0;">📖 No Recipe</strong> <span>A recipe exists for this item, but you haven't learned it yet.</span>
+        <strong style="color:#ff8888;">⬆ Low Skill</strong> <span>Your skill level is too low to craft this item.</span>
+        <strong style="color:var(--text);">🚫 No Craft</strong> <span>Hides all craftable items, showing only work orders that require non-craftable items.</span>
+      </div>
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-top:20px;margin-bottom:10px;">Table Tips</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+        <strong style="color:var(--text);">Column headers</strong> <span>Click to sort by that column.</span>
+        <strong style="color:var(--text);">Item names</strong> <span>Click to open the item's <span style="color:var(--gold);">Project Gorgon wiki</span> page.</span>
+        <strong style="color:var(--text);">🔨 button</strong> <span>View the full crafting breakdown and ingredient list for that item.</span>
+        <strong style="color:var(--text);">NPC / Zone</strong> <span>Click to open the NPC or zone wiki page. Hover to see the other value.</span>
+      </div>
+
+    </div>
+  </div>
+
   <div class="quests-controls" id="wo-controls">
     <input class="inp" style="width:220px" id="wo-search" placeholder="Search work order…"
            onkeydown="if(event.key==='Enter'){woSearch=this.value;renderWorkOrdersTab();}"
@@ -292,33 +409,36 @@
   <div id="wo-npc-filter-bar" style="padding:6px 12px 4px;gap:6px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border-dim);background:var(--bg2);"></div>
   <div id="wo-craft-skill-filter-bar" style="display:none;padding:6px 12px 4px;gap:6px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border-dim);background:var(--bg2);"></div>
   <div id="wo-level-filter-bar" style="display:flex;flex-direction:column;border-bottom:1px solid var(--border-dim);background:var(--bg2);">
-    <!-- Row 1: primary action buttons + filter buttons -->
-    <div style="display:flex;padding:6px 12px;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;">
-      <button class="btn" id="wo-filtered-itemsneeded-btn"
-              onclick="openFilteredItemsNeededModal()"
-              title="View a shopping list for only the work orders currently visible in the table, based on your active filters."
-              style="font-size:15px;font-weight:bold;padding:14px 22px;border-color:#5fcaaa;color:#5fcaaa;background:rgba(95,202,170,.1);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
-        🔍 Filtered List
-        <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Items needed for visible orders</div>
-      </button>
-      <button class="btn" id="wo-itemsneeded-btn"
-              onclick="openItemsNeededModal()"
-              title="View a combined shopping list of all items needed to complete the possible work orders, with storage shortfalls, contract reward rates, and sub-ingredient breakdowns."
-              style="font-size:15px;font-weight:bold;padding:14px 22px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
-        🛒 Shopping List
-        <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Items needed across all orders</div>
-      </button>
+    <!-- Row 1: Plan Route (centered) -->
+    <div style="display:flex;padding:10px 12px 6px;justify-content:center;">
       <button class="btn" id="wo-planroute-btn"
               onclick="openRouteModal()"
               title="Plan the most efficient route to turn in all possible work orders. Groups orders by NPC and zone to minimize travel, then lists each stop in order."
-              style="font-size:18px;font-weight:bold;padding:18px 28px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
+              style="font-size:22px;font-weight:bold;padding:20px 56px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);letter-spacing:1px;white-space:nowrap;line-height:1.2;border-radius:6px;">
         🚚 Plan Route
-        <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Groups stops by NPC &amp; zone</div>
+        <div style="font-size:11px;font-weight:normal;opacity:0.7;margin-top:4px;">Groups stops by NPC &amp; zone</div>
+      </button>
+    </div>
+    <!-- Row 2: Shopping List, Filtered List, Update Character -->
+    <div style="display:flex;padding:4px 12px 8px;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;">
+      <button class="btn" id="wo-itemsneeded-btn"
+              onclick="openItemsNeededModal()"
+              title="View a combined shopping list of all items needed to complete the possible work orders, with storage shortfalls, contract reward rates, and sub-ingredient breakdowns."
+              style="font-size:13px;font-weight:bold;padding:10px 18px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
+        🛒 Shopping List
+        <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Items needed across all orders</div>
+      </button>
+      <button class="btn" id="wo-filtered-itemsneeded-btn"
+              onclick="openFilteredItemsNeededModal()"
+              title="View a shopping list for only the work orders currently visible in the table, based on your active filters."
+              style="font-size:13px;font-weight:bold;padding:10px 18px;border-color:#5fcaaa;color:#5fcaaa;background:rgba(95,202,170,.1);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
+        🔍 Filtered List
+        <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Items needed for visible orders</div>
       </button>
       <button class="btn" id="wo-updatechar-btn"
               onclick="importFromReportsFolder()"
               title="Reload your character data from the reports folder to refresh inventory, skills, recipes, and active contracts."
-              style="font-size:15px;font-weight:bold;padding:14px 22px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
+              style="font-size:13px;font-weight:bold;padding:10px 18px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
         🔄 Update Character
         <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Reload inventory &amp; skills</div>
       </button>
@@ -379,14 +499,38 @@
 
 <!-- ═══════════════════════════ IMPORTS VIEW ═══════════════════════════ -->
 <div id="view-imports" style="display:none;padding:32px 40px;max-width:860px;margin:0 auto;">
-  <h2 style="color:var(--gold);font-family:Georgia,serif;margin:0 0 16px;text-align:center;">📥 Data Imports</h2>
-  <p style="color:var(--text-dim);font-size:13px;line-height:1.7;margin:0 0 10px;">
-    PG Quartermaster needs three things to work: your <strong style="color:var(--text);">inventory</strong>, your <strong style="color:var(--text);">character sheet</strong>, and <strong style="color:var(--text);">game data</strong> from the CDN. Use <strong style="color:var(--gold);">One Click Initialization</strong> below to load everything at once, or use the manual options further down the page.
-  </p>
-  <p style="color:var(--text-dim);font-size:12px;line-height:1.7;margin:0 0 24px;">
-    📁 Inventory and character files are generated in-game via <strong style="color:var(--text);">Settings → VIP → Export Storage / Export Character as JSON</strong> and saved to:<br>
-    <span style="font-family:monospace;color:var(--text);background:#1a1510;padding:2px 8px;border-radius:3px;border:1px solid var(--border-dim);display:inline-block;margin-top:6px;">C:\Users\<span style="color:var(--gold);">[your username]</span>\AppData\LocalLow\Elder Game\Project Gorgon\Reports</span>
-  </p>
+  <!-- Welcome Hero -->
+  <div style="text-align:center;margin-bottom:28px;padding:28px 24px;border:1px solid var(--border);border-radius:8px;background:rgba(200,168,75,.04);">
+    <div style="font-family:Georgia,serif;font-size:26px;color:var(--gold);letter-spacing:2px;margin-bottom:14px;">Welcome to PG Quartermaster</div>
+    <p style="color:var(--text-dim);font-size:13px;line-height:1.6;margin:0 0 16px;max-width:600px;display:inline-block;">A companion tool for <strong style="color:var(--text);">Project Gorgon</strong> that helps you work smarter, not harder.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:10px 20px;justify-content:center;max-width:640px;margin:0 auto;">
+      <div style="flex:1 1 280px;text-align:left;font-size:12px;color:var(--text-dim);line-height:2;">
+        <div>🚚 <strong style="color:var(--text);">Route Planner</strong> — optimal routes for work order turn-ins</div>
+        <div>🔨 <strong style="color:var(--text);">Craft Planner</strong> — what to craft, what to pick up, step by step</div>
+      </div>
+      <div style="flex:1 1 280px;text-align:left;font-size:12px;color:var(--text-dim);line-height:2;">
+        <div>📚 <strong style="color:var(--text);">Missing Recipes</strong> — find what you haven't learned yet</div>
+        <div>🗺 <strong style="color:var(--text);">Quest Tracker</strong> — delivery quests and where to turn them in</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 style="color:var(--gold);font-family:Georgia,serif;margin:0 0 16px;text-align:center;">📥 Getting Started</h2>
+
+  <!-- How to Export -->
+  <div style="color:var(--text-dim);font-size:12px;line-height:1.8;margin:0 0 24px;padding:16px 20px;border:1px solid var(--border-dim);border-radius:6px;background:#1a1510;">
+    <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-bottom:8px;">First, export your data from Project Gorgon:</div>
+    <ol style="margin:0;padding-left:22px;">
+      <li>Open <strong style="color:var(--text);">Settings</strong> in-game (gear icon)</li>
+      <li>Go to the <strong style="color:var(--text);">VIP</strong> tab</li>
+      <li>Click <strong style="color:var(--gold);">Export Storage</strong> — saves your inventory as JSON</li>
+      <li>Click <strong style="color:var(--gold);">Export Character</strong> — saves your character sheet as JSON</li>
+      <li>Come back here and click <strong style="color:var(--gold);">One Click Initialization</strong> below</li>
+    </ol>
+    <div style="margin-top:8px;font-size:11px;color:var(--text-dim);">
+      📁 Files are saved to: <span style="font-family:monospace;color:var(--text);background:#151210;padding:1px 6px;border-radius:3px;border:1px solid var(--border-dim);">C:\Users\<span style="color:var(--gold);">[you]</span>\AppData\LocalLow\Elder Game\Project Gorgon\Reports</span>
+    </div>
+  </div>
 
   <div style="display:flex;flex-direction:column;gap:16px;">
 
@@ -663,6 +807,13 @@ let _invTotalCache     = null;  // { nameLower → totalQty } across all vaults
 
 /* ── init ── */
 async function init() {
+  // If user has already seen guides, skip the flashing animation
+  ['wo', 'quests', 'mr'].forEach(k => {
+    if (localStorage.getItem(`pg_${k}_guide_seen`) === '1') {
+      const gh = document.getElementById(`${k}-guide-header`);
+      if (gh) { gh.classList.remove('guide-new'); gh.classList.add('guide-opened'); }
+    }
+  });
   if (localStorage.getItem('pgq_debug_unlocked') === '1') {
     _debugUnlocked = true;
     _debugPinned   = true;
@@ -7577,6 +7728,41 @@ function renderMissingRecipesTab() {
     return `<th data-col="${key}" onclick="mrSetSort('${key}')" style="padding:6px 10px;text-align:left;white-space:nowrap;cursor:pointer;background:var(--thead-bg);border-bottom:2px solid var(--border);font-size:11px;letter-spacing:.4px;color:${active ? 'var(--gold)' : 'var(--text-dim)'};font-weight:normal;${w ? `width:${w};` : ''}">${key === 'contract' ? '📋' : key === 'reqLevel' ? 'Req Lvl' : key === 'yourFavor' ? 'Your Favor' : key.charAt(0).toUpperCase() + key.slice(1)}${arrow}</th>`;
   };
 
+  /* ── guide ── */
+  const _mrSeen = localStorage.getItem('pg_mr_guide_seen') === '1';
+  const mrGuide = `
+  <div id="mr-guide" style="border-bottom:1px solid var(--border-dim);background:rgba(200,168,75,.04);">
+    <div id="mr-guide-header" onclick="const b=document.getElementById('mr-guide-body');const a=this.querySelector('.guide-arrow');const h=this;if(b.style.display==='none'){b.style.display='block';a.textContent='▾';h.classList.remove('guide-new');h.classList.add('guide-opened');localStorage.setItem('pg_mr_guide_seen','1');}else{b.style.display='none';a.textContent='▸';}"
+         class="guide-header ${_mrSeen ? 'guide-opened' : 'guide-new'}"
+         style="display:flex;align-items:center;gap:10px;padding:10px 18px;cursor:pointer;user-select:none;">
+      <span class="guide-arrow" style="font-size:13px;transition:transform .15s;">▸</span>
+      <span style="font-size:14px;font-family:Georgia,serif;letter-spacing:.5px;">How to use Missing Recipes</span>
+      <span class="guide-hint" style="font-size:11px;font-style:italic;">(click to expand)</span>
+    </div>
+    <div id="mr-guide-body" style="display:none;padding:6px 28px 24px;font-size:13px;color:var(--text-dim);line-height:1.9;">
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-bottom:14px;">What This Tab Shows</div>
+      <p style="margin:0 0 14px;">Lists every learnable recipe your character hasn't acquired yet, based on your imported character data and the game's recipe database. Use it to find what you're missing and where to learn it.</p>
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-bottom:10px;">Filters</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+        <strong style="color:var(--text);">Skill pills</strong> <span>Click a skill name to show only recipes for that crafting skill. Click "All" to reset.</span>
+        <strong style="color:var(--text);">📋 Have Contract</strong> <span>Show only recipes you hold a contract for — useful for prioritizing what to learn next.</span>
+        <strong style="color:var(--text);">❓ No Trainer</strong> <span>Show recipes with no known trainer — these may come from hangouts, drops, or other sources.</span>
+        <strong style="color:var(--text);">Search</strong> <span>Filter by recipe name, skill, or trainer.</span>
+      </div>
+
+      <div style="font-family:Georgia,serif;font-size:13px;color:var(--text);margin-top:20px;margin-bottom:10px;">Table Tips</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+        <strong style="color:var(--text);">Column headers</strong> <span>Click to sort by name, skill, level, trainer, zone, or favor.</span>
+        <strong style="color:var(--text);">Recipe names</strong> <span>Link to that skill's complete recipe list on the wiki.</span>
+        <strong style="color:var(--text);">Trainer names</strong> <span>Link to the NPC's wiki page so you can find them.</span>
+        <strong style="color:var(--text);">Your Favor</strong> <span>Shows your current favor level with the trainer, color-coded. Note: required favor is not in public data — check the wiki or in-game.</span>
+      </div>
+
+    </div>
+  </div>`;
+
   /* ── filter bar ── */
   const filterBar = `
     <div style="background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;">
@@ -7607,7 +7793,7 @@ function renderMissingRecipesTab() {
     </div>`;
 
   if (!sortable.length) {
-    panel.innerHTML = filterBar + favorWarning + `<div style="padding:40px;text-align:center;color:var(--text-dim);font-size:14px;">No missing learnable recipes match these filters.</div>`;
+    panel.innerHTML = mrGuide + filterBar + favorWarning + `<div style="padding:40px;text-align:center;color:var(--text-dim);font-size:14px;">No missing learnable recipes match these filters.</div>`;
     return;
   }
 
@@ -7630,7 +7816,7 @@ function renderMissingRecipesTab() {
     });
   }).join('');
 
-  panel.innerHTML = filterBar + favorWarning + `
+  panel.innerHTML = mrGuide + filterBar + favorWarning + `
     <div style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-family:Georgia,serif;">
         <thead><tr>
