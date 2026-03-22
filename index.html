@@ -202,7 +202,6 @@
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
   <!-- ── Distribution notice ── -->
-  <div style="text-align:center;padding:4px;background:#1a1510;border-bottom:1px solid var(--border-dim);font-size:10px;color:var(--gold);font-style:italic;">Please do not distribute without permission.</div>
 
   <!-- ── Tab bar ── -->
   <div id="tabBar" class="tab-bar" style="position:sticky;top:0;z-index:30;">
@@ -450,7 +449,24 @@
       Data sourced from the official Project Gorgon CDN, which you can access by clicking <a href="https://cdn.projectgorgon.com/v465/data/index.html" target="_blank" style="color:var(--gold);text-decoration:none;font-weight:bold;">here</a>!
     </div>
 
-    <div style="margin-top:32px;padding-top:20px;border-top:1px solid var(--border-dim);display:flex;justify-content:flex-end;">
+    <!-- Special Thanks -->
+    <div style="margin-top:32px;padding-top:20px;border-top:1px solid var(--border-dim);text-align:center;">
+      <div style="font-family:Georgia,serif;font-size:14px;color:var(--gold);margin-bottom:10px;">Special Thanks</div>
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.8;">
+        To the players who helped test and shape this tool:<br>
+        <span style="color:var(--text);">ActionAudio-Arisetsu</span> ·
+        <span style="color:var(--text);">Airyina-Arisetsu</span> ·
+        <span style="color:var(--text);">GingerLogan-Arisetsu</span> ·
+        <span style="color:var(--text);">Iwazaruscoff-Arisetsu</span> ·
+        <span style="color:var(--text);">Kaeus-Dreva</span> ·
+        <span style="color:var(--text);">Lildace-Arisetsu</span> ·
+        <span style="color:var(--text);">Malady-Dreva</span> ·
+        <span style="color:var(--text);">Nomenclad-Arisetsu</span> ·
+        <span style="color:var(--text);">Unbeef-Arisetsu</span>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-dim);display:flex;justify-content:flex-end;">
       <button class="btn" onclick="resetImportedData()" style="font-size:12px;padding:6px 16px;border-color:#8b3a3a;color:#c97070;background:rgba(139,58,58,.1);">🗑 Reset to Defaults</button>
     </div>
 
@@ -7641,25 +7657,27 @@ function submitBugReport() {
   const hasGame  = !!gameData;
   const itemCount = hasInv ? invData.Items.length : 0;
   const skillCount = hasChar && charData.Skills ? Object.keys(charData.Skills).length : 0;
-  const recipeCount = hasGame && gameData.recipes ? Object.keys(gameData.recipes).length : 0;
+  const recipeCount = recipesData ? Object.keys(recipesData).length : 0;
   const woRowCount = (_lastWoRows || []).length;
 
   // Active tab
-  const activeTab = document.querySelector('.tab-btn[style*="border-bottom"]')?.textContent?.trim() || '?';
+  const activeTab = document.querySelector('.tab-btn.active')?.textContent?.trim() || '?';
 
-  // Active filters
+  // Active filters — these variables live in a closure, so access safely
   const filters = [];
-  if (woHaveItem) filters.push('haveItem');
-  if (woCanCraftAll) filters.push('canCraft');
-  if (woHaveContract) filters.push('haveContract');
-  if (woWithinMyLevel) filters.push('withinLevel');
-  if (woCanBuyAll) filters.push('canBuy');
-  if (woItemInZone) filters.push('itemInZone');
-  if (woCraftStatusFilter.size) filters.push('craftStatus:' + [...woCraftStatusFilter].join(','));
-  if (woHideCraftable) filters.push('hideCraftable');
-  if (woNpcFilter.size) filters.push('npcFilter:' + woNpcFilter.size);
-  if (_routeNoCrafting) filters.push('noCrafting');
-  if (_routeNoPurchases) filters.push('noPurchases');
+  try {
+    if (typeof woHaveItem !== 'undefined' && woHaveItem) filters.push('haveItem');
+    if (typeof woCanCraftAll !== 'undefined' && woCanCraftAll) filters.push('canCraft');
+    if (typeof woHaveContract !== 'undefined' && woHaveContract) filters.push('haveContract');
+    if (typeof woWithinMyLevel !== 'undefined' && woWithinMyLevel) filters.push('withinLevel');
+    if (typeof woCanBuyAll !== 'undefined' && woCanBuyAll) filters.push('canBuy');
+    if (typeof woItemInZone !== 'undefined' && woItemInZone) filters.push('itemInZone');
+    if (typeof woCraftStatusFilter !== 'undefined' && woCraftStatusFilter.size) filters.push('craftStatus:' + [...woCraftStatusFilter].join(','));
+    if (typeof woHideCraftable !== 'undefined' && woHideCraftable) filters.push('hideCraftable');
+    if (typeof woNpcFilter !== 'undefined' && woNpcFilter.size) filters.push('npcFilter:' + woNpcFilter.size);
+    if (typeof _routeNoCrafting !== 'undefined' && _routeNoCrafting) filters.push('noCrafting');
+    if (typeof _routeNoPurchases !== 'undefined' && _routeNoPurchases) filters.push('noPurchases');
+  } catch(e) { filters.push('error:' + e.message); }
 
   // Skills summary
   let skillsSummary = '—';
