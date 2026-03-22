@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A1v0</title>
+<title>PG Quartermaster A1v1</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -204,7 +204,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v0</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v1</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -295,8 +295,9 @@
             onclick="toggleShowHidden()">👁 Show Hidden (0)</button>
     <button class="btn" id="quests-pin-active-btn" style="font-size:11px;padding:4px 12px;"
             onclick="questPinActive=!questPinActive; renderQuestsTab()">📌 Active Pinned</button>
-    <button class="btn" id="quests-fetch-btn" style="font-size:11px;padding:4px 12px;margin-left:auto;"
-            onclick="fetchQuestsData()">⬇ Fetch Quest Data</button>
+    <button class="btn" id="quests-updatechar-btn" style="font-size:11px;padding:4px 12px;margin-left:auto;"
+            onclick="importFromReportsFolder()"
+            title="Reload your character data from the reports folder to refresh inventory, skills, recipes, and active quests.">🔄 Update Character</button>
   </div>
   <div style="display:flex;justify-content:center;padding:12px 0 8px;">
     <button class="btn" id="quests-route-btn" style="font-size:22px;font-weight:bold;padding:20px 56px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);border-radius:6px;cursor:pointer;font-family:Georgia,serif;letter-spacing:1px;line-height:1.2;"
@@ -1734,7 +1735,8 @@ const QUEST_COLS = [
   { key: 'quest',    label: 'Quest',          sortable: true,  w: 190 },
   { key: 'location', label: 'Location',       sortable: true,  w: 110 },
   { key: 'npc',      label: 'NPC',            sortable: true,  w: 120 },
-  { key: 'item',     label: 'Item Required',  sortable: true,  w: 170 },
+  { key: 'craft',    label: '🔨',            sortable: true,  w: 36  },
+  { key: 'item',     label: 'Item Required',  sortable: true,  w: 150 },
   { key: 'qty',      label: 'Qty',            sortable: true,  w: 50  },
   { key: 'inv',      label: 'In Inventory',   sortable: true,  w: 120 },
   { key: 'hide',     label: '🚫',             sortable: false, w: 36  },
@@ -4379,8 +4381,19 @@ function closeRouteModal(evt) {
 
 function reRenderRoute() {
   saveFilterState();
-  const routeData = buildRouteData(_lastWoRows);
-  document.getElementById('routeModalBody').innerHTML = renderRouteHtml(routeData);
+  if (_routeModalMode === 'quest') {
+    // Re-render quest route
+    const rows = _lastQuestRows;
+    if (!rows || !rows.length) return;
+    const actionable = rows.filter(r => r.itemDisplay && !r.isWorkOrder && r.isActive);
+    if (!actionable.length) return;
+    const data = buildQuestRouteData(actionable);
+    _lastQuestRouteData = data;
+    document.getElementById('routeModalBody').innerHTML = renderQuestRouteHtml(data);
+  } else {
+    const routeData = buildRouteData(_lastWoRows);
+    document.getElementById('routeModalBody').innerHTML = renderRouteHtml(routeData);
+  }
 }
 function routeMarkDone(nameLower, displayName, qty, zone, isIngredient) {
   _routeBought.add(nameLower);
@@ -5788,7 +5801,7 @@ function buildRouteData(rows) {
             // If NPC purchases are disabled, vendor-dependent ingredients can't be obtained
             if (_routeNoPurchases || VENDOR_PURCHASE_BLOCKLIST.has(ing.nameLower)) { allCovered = false; break; }
             const iik = gameItemKeyByName[ing.nameLower];
-            const ingVendors = iik ? (itemVendorsMap[iik] || []).filter(v => !v.isBarter) : [];
+            const ingVendors = iik ? (itemVendorsMap[iik] || []).filter(v => !v.isBarter && (!v.zone || !_routeSkipVendor.has(ing.nameLower + '|' + v.zone))) : [];
             if (!ingVendors.length) { allCovered = false; break; }
             _ingInfo.push({ ing, totalNeeded, inStorage, shortfall, vendors: ingVendors });
           } else {
@@ -7140,125 +7153,654 @@ questResolveZone._locMap = {
 };
 
 function buildQuestRouteData(rows) {
+  // ── Global reservation map (same pattern as WO planner) ──
+  const globalReserved = {};
+  function commitReservation(nameLower, qty) {
+    if (qty <= 0) return;
+    globalReserved[nameLower] = (globalReserved[nameLower] || 0) + qty;
+  }
+  function adjTotal(nameLower) {
+    const base = _getInvTotal(nameLower);
+    let reserved = globalReserved[nameLower] || 0;
+    const subDef = INGREDIENT_SUBS[nameLower];
+    if (subDef) reserved += (globalReserved[subDef.sub] || 0);
+    for (const [parent, def] of Object.entries(INGREDIENT_SUBS)) {
+      if (def.sub === nameLower) {
+        const parentBase = _invTotalCache?.[parent] || 0;
+        const parentReserved = globalReserved[parent] || 0;
+        const fromSub = Math.max(0, parentReserved - parentBase);
+        reserved += fromSub;
+        break;
+      }
+    }
+    return Math.max(0, base - reserved);
+  }
+  function adjBreakdown(nameLower) {
+    let remaining = globalReserved[nameLower] || 0;
+    if (remaining <= 0) return getInvBreakdown(nameLower);
+    return getInvBreakdown(nameLower).map(b => {
+      if (remaining <= 0) return b;
+      const deduct = Math.min(b.qty, remaining);
+      remaining -= deduct;
+      return { ...b, qty: b.qty - deduct };
+    }).filter(b => b.qty > 0);
+  }
+  function portableQtyOf(nameLower) {
+    if (!invData) return 0;
+    return adjBreakdown(nameLower).filter(b => isPortableVault(b)).reduce((s, b) => s + b.qty, 0);
+  }
+
   const stops = {};
+  const craftJobs = [];
   const unavailable = [];
+  const vendorNeededItems = [];
+
   function ensureStop(zone) {
-    if (!stops[zone]) stops[zone] = { pickups: [], deliveries: [], isGather: false };
+    if (!stops[zone]) stops[zone] = { pickups: [], localCrafts: [], deliveries: [], isGather: false };
     return stops[zone];
   }
 
-  // ── Pre-pass: group by quest and check if ALL items are available ──
-  const questRows = {};  // questId → [row, ...]
+  // ── Pre-pass: group by quest and check if ALL items can be obtained ──
+  const questRowsMap = {};
   for (const r of rows) {
     const qid = r.questId || r.internalName || r.questName;
-    if (!questRows[qid]) questRows[qid] = [];
-    questRows[qid].push(r);
+    if (!questRowsMap[qid]) questRowsMap[qid] = [];
+    questRowsMap[qid].push(r);
   }
-  const questBlocked = {};  // questId → [missing item descriptions]
-  for (const [qid, qRows] of Object.entries(questRows)) {
-    if (qRows.length < 2) continue;  // single-item quests always fine
+  const questBlocked = {};
+  for (const [qid, qRows] of Object.entries(questRowsMap)) {
+    if (qRows.length < 2) continue;
     const missing = [];
     for (const r of qRows) {
       const nl = r.itemDisplay.toLowerCase();
-      const breakdown = getInvBreakdown(nl);
-      const totalQty = breakdown.reduce((s, b) => s + b.qty, 0);
-      if (totalQty < r.qtyNeeded) {
-        missing.push(totalQty > 0
-          ? `${r.itemDisplay} (have ${totalQty}/${r.qtyNeeded})`
-          : `${r.itemDisplay} (need ${r.qtyNeeded})`);
+      const totalInv = invData ? _getInvTotal(nl) : 0;
+      if (totalInv >= r.qtyNeeded) continue; // have enough in inventory
+      // Check if craftable
+      const cs = invData && charData ? getCraftStatus(nl, r.qtyNeeded) : null;
+      if (cs === 'gold' && !_routeNoCrafting) continue;
+      if ((cs === 'green' || cs === 'gold') && !_routeNoCrafting && !_routeNoPurchases) continue;
+      // Check if vendor-purchasable
+      if (!_routeNoPurchases && !VENDOR_PURCHASE_BLOCKLIST.has(nl)) {
+        const ik = gameItemKeyByName[nl];
+        const vendors = ik ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter) : [];
+        if (vendors.length > 0) continue; // can buy remainder
       }
+      missing.push(totalInv > 0
+        ? `${r.itemDisplay} (have ${totalInv}/${r.qtyNeeded})`
+        : `${r.itemDisplay} (need ${r.qtyNeeded})`);
     }
     if (missing.length) questBlocked[qid] = missing;
   }
 
+  // ── Main loop ──
   for (const r of rows) {
     const nl = r.itemDisplay.toLowerCase();
     const npcZone = questResolveZone(r);
     if (!npcZone) { unavailable.push({ r, reason: 'unknown NPC zone' }); continue; }
 
-    // If any item for this quest is missing, skip all items for it
     const qid = r.questId || r.internalName || r.questName;
     if (questBlocked[qid]) {
       const others = questBlocked[qid].filter(m => !m.startsWith(r.itemDisplay + ' ('));
       const reason = others.length
         ? `also need: ${others.join(', ')}`
-        : `need ${r.qtyNeeded}, not in inventory`;
+        : `need ${r.qtyNeeded}, not obtainable`;
       unavailable.push({ r, reason });
       continue;
     }
 
-    // Check inventory
-    const breakdown = getInvBreakdown(nl);
-    const portableQty = breakdown.filter(b => isPortableVault(b)).reduce((s, b) => s + b.qty, 0);
-    const totalQty = breakdown.reduce((s, b) => s + b.qty, 0);
+    const delivZone = npcZone;
+    const craftStatus = invData ? getCraftStatus(nl, r.qtyNeeded, globalReserved) : null;
 
-    if (portableQty >= r.qtyNeeded) {
-      // Already on person — just turn in
-      ensureStop(npcZone).deliveries.push({ r, readyNote: 'on person ✓', qty: r.qtyNeeded });
-    } else if (totalQty >= r.qtyNeeded) {
-      // Need storage pickups
-      let needed = r.qtyNeeded - portableQty;
-      const storageBreakdown = breakdown.filter(b => !isPortableVault(b));
-      for (const b of storageBreakdown) {
+    // ── Fully portable ──
+    if (portableQtyOf(nl) >= r.qtyNeeded) {
+      ensureStop(delivZone).deliveries.push({ r, readyNote: 'on person ✓', qty: r.qtyNeeded });
+      continue;
+    }
+
+    // ── Partial inventory helper (lazy commit) ──
+    let _partialPickedUp = 0;
+    let _partialCommitted = false;
+    const _existingTotal = invData ? adjTotal(nl) : 0;
+    const _hasPartialInv = _existingTotal > 0 && _existingTotal < r.qtyNeeded;
+    function _commitPartialPickup() {
+      if (_partialCommitted || !_hasPartialInv) return;
+      _partialCommitted = true;
+      const breakdown = adjBreakdown(nl);
+      let needed = _existingTotal;
+      for (const b of breakdown) {
         if (needed <= 0) break;
         const take = Math.min(b.qty, needed);
+        if (isPortableVault(b)) { needed -= take; continue; }
         const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
         const st = ensureStop(bZone);
-        st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault || b.vaultKey, forQuest: r.questName, forNpc: r.npc });
+        st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: false });
         st.isGather = true;
         needed -= take;
       }
-      ensureStop(npcZone).deliveries.push({ r, readyNote: 'from storage', qty: r.qtyNeeded });
-    } else if (totalQty > 0) {
-      // Partial — some in inventory but not enough
-      unavailable.push({ r, reason: `need ${r.qtyNeeded}, have ${totalQty}` });
-    } else {
-      // Not in inventory at all
-      unavailable.push({ r, reason: 'not in inventory' });
+      commitReservation(nl, _existingTotal);
+      _partialPickedUp = _existingTotal;
     }
+    const _craftQty = _hasPartialInv ? (r.qtyNeeded - _existingTotal) : r.qtyNeeded;
+
+    // ── Gold-craft path ──
+    if (craftStatus === 'gold' && !_routeNoCrafting) {
+      const rec = getBestCraftRecipe(nl, _craftQty, globalReserved);
+      if (rec) {
+        const craftsNeeded = Math.ceil(_craftQty / (rec.resultQty || 1));
+        const plan = buildCraftPlan(rec, craftsNeeded, globalReserved);
+        if (plan.canFulfill && plan.steps.length) {
+          // Check that no vendor-buy ingredients have ALL vendor zones skipped
+          let _vendorSkipBlocked = false;
+          for (const step of plan.steps) {
+            for (const sing of step.ingredients) {
+              if (sing.needsVendorBuy && sing.vendors && sing.vendors.length) {
+                const available = sing.vendors.filter(v => !v.zone || !_routeSkipVendor.has(sing.nameLower + '|' + v.zone));
+                if (!available.length) { _vendorSkipBlocked = true; break; }
+              }
+            }
+            if (_vendorSkipBlocked) break;
+          }
+          if (_vendorSkipBlocked) { /* fall through to next path */ }
+          else {
+          _commitPartialPickup();
+          let allPickupsLocal = _partialPickedUp > 0 ? false : true;
+          const allCraftSteps = [];
+          for (const step of plan.steps) {
+            const stepPickupNote = step.warning || null;
+            const jobIngredients = [];
+            for (const sing of step.ingredients) {
+              if (sing.isCrafted) {
+                if (sing.inStorageQty > 0) {
+                  const bd = sing.breakdown || [];
+                  let needed = sing.inStorageQty;
+                  for (const b of bd) {
+                    if (needed <= 0) break;
+                    const take = Math.min(b.qty, needed);
+                    if (isPortableVault(b)) { needed -= take; continue; }
+                    const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+                    if (bZone !== delivZone) allPickupsLocal = false;
+                    const st = ensureStop(bZone);
+                    st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
+                    st.isGather = true;
+                    needed -= take;
+                  }
+                }
+                jobIngredients.push({ name: sing.name, nameLower: sing.nameLower, totalNeeded: sing.totalNeeded,
+                  breakdown: sing.breakdown || [], isCrafted: true, craftedQty: sing.craftedQty, inStorageQty: sing.inStorageQty });
+                continue;
+              }
+              if (sing.isDynamic) {
+                const bd = sing.breakdown || [];
+                let needed = sing.totalNeeded;
+                for (const b of bd) {
+                  if (needed <= 0) break;
+                  const take = Math.min(b.qty, needed);
+                  if (isPortableVault(b)) { needed -= take; continue; }
+                  const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+                  if (bZone !== delivZone) allPickupsLocal = false;
+                  const st = ensureStop(bZone);
+                  st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
+                  st.isGather = true;
+                  needed -= take;
+                }
+                jobIngredients.push({ name: sing.name, nameLower: sing.nameLower, totalNeeded: sing.totalNeeded, isDynamic: true, breakdown: bd });
+                continue;
+              }
+              if (sing.needsVendorBuy || (_routeBought.has(sing.nameLower) && (_routeBoughtDisplay[sing.nameLower] || {}).isIngredient)) {
+                const wasBought = _routeBought.has(sing.nameLower) && (_routeBoughtDisplay[sing.nameLower] || {}).isIngredient;
+                vendorNeededItems.push({
+                  name: sing.name, nl: sing.nameLower, qty: sing.needsVendorBuy || (_routeBoughtDisplay[sing.nameLower] || {}).qty || sing.totalNeeded,
+                  vendors: sing.vendors || [], isIngredient: true, forCraftItem: nl, forCraftItemName: r.itemDisplay,
+                  isBought: wasBought || false
+                });
+                if (sing.inStorageQty > 0) {
+                  const bd = sing.breakdown || [];
+                  let needed = sing.inStorageQty;
+                  for (const b of bd) {
+                    if (needed <= 0) break;
+                    const take = Math.min(b.qty, needed);
+                    if (isPortableVault(b)) { needed -= take; continue; }
+                    const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+                    if (bZone !== delivZone) allPickupsLocal = false;
+                    const st = ensureStop(bZone);
+                    st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
+                    st.isGather = true;
+                    needed -= take;
+                  }
+                }
+                allPickupsLocal = false;
+                jobIngredients.push({ name: sing.name, nameLower: sing.nameLower, totalNeeded: sing.totalNeeded, breakdown: sing.breakdown || [],
+                  needsVendorBuy: sing.needsVendorBuy || (_routeBoughtDisplay[sing.nameLower] || {}).qty || sing.totalNeeded,
+                  vendorZones: (sing.vendors || []).map(v => v.zone), isPurchased: wasBought });
+                continue;
+              }
+              // Regular ingredient
+              const bd = sing.breakdown || [];
+              jobIngredients.push({ name: sing.name, nameLower: sing.nameLower, totalNeeded: sing.totalNeeded, breakdown: bd });
+              let needed = sing.totalNeeded;
+              for (const b of bd) {
+                if (needed <= 0) break;
+                const take = Math.min(b.qty, needed);
+                if (isPortableVault(b)) { needed -= take; continue; }
+                const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+                if (bZone !== delivZone) allPickupsLocal = false;
+                const st = ensureStop(bZone);
+                const pickupName = b.isSub ? (gameDataCased[b.subName] || b.subName) : sing.name;
+                const pickupNl   = b.isSub ? b.subName : sing.nameLower;
+                st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, needsFill: b.isSub ? b.subNote : null, pickupNote: stepPickupNote });
+                if (b.isSub) st.hasFillStep = true;
+                st.isGather = true;
+                needed -= take;
+              }
+            }
+            allCraftSteps.push({
+              recipe: step.recipe, craftsNeeded: step.craftsNeeded,
+              ingredients: jobIngredients, isSubCraft: step.depth > 0,
+              resultName: step.resultName, resultNameLower: step.resultNameLower,
+              depth: step.depth, parentName: step.parentName,
+              requiredZones: step.requiredZones, stationName: step.stationName, warning: step.warning
+            });
+          }
+          const mainStep = allCraftSteps[allCraftSteps.length - 1];
+          const subSteps = allCraftSteps.slice(0, -1);
+          for (const sc of subSteps) {
+            if (sc.requiredZones && sc.requiredZones.length) {
+              const existing = sc.requiredZones.find(z => stops[z]);
+              const atDeliv  = sc.requiredZones.includes(delivZone);
+              const bestZone = existing || (atDeliv ? delivZone : sc.requiredZones[0]);
+              ensureStop(bestZone).isGather = true;
+              if (bestZone !== delivZone) allPickupsLocal = false;
+            }
+          }
+          if (allPickupsLocal) {
+            ensureStop(delivZone).localCrafts.push({ r, rec: mainStep.recipe, craftsNeeded: mainStep.craftsNeeded,
+              ingredients: mainStep.ingredients, subCrafts: subSteps, hasVendorIngredients: plan.hasVendorBuys });
+            ensureStop(delivZone).isGather = true;
+          } else {
+            const ingredientZones = new Set();
+            allCraftSteps.forEach(step => {
+              step.ingredients.forEach(ing => {
+                (ing.breakdown || []).filter(b => !isPortableVault(b)).forEach(b => {
+                  ingredientZones.add(vaultToZone(b.vaultKey) || b.zone || 'Unknown');
+                });
+                if (ing.vendorZones) ing.vendorZones.forEach(z => { if (z && z !== '—') ingredientZones.add(z); });
+              });
+              if (step.requiredZones && step.requiredZones.length) {
+                const existing = step.requiredZones.find(z => stops[z]);
+                ingredientZones.add(existing || step.requiredZones[0]);
+              }
+            });
+            for (const iz of [...ingredientZones]) { if (!stops[iz]) ingredientZones.delete(iz); }
+            craftJobs.push({ r, rec: mainStep.recipe, craftsNeeded: mainStep.craftsNeeded,
+              ingredients: mainStep.ingredients, ingredientZones, delivZone, subCrafts: subSteps, hasVendorIngredients: plan.hasVendorBuys });
+            ensureStop(delivZone).deliveries.push({ r, readyNote: 'after crafting', qty: r.qtyNeeded });
+          }
+          for (const step of plan.steps) {
+            for (const sing of step.ingredients) {
+              if (sing.isCrafted) { if (sing.inStorageQty > 0) commitReservation(sing.nameLower, sing.inStorageQty); }
+              else if (sing.needsVendorBuy) { if (sing.inStorageQty > 0) commitReservation(sing.nameLower, sing.inStorageQty); }
+              else if (!sing.isPurchased) { commitReservation(sing.nameLower, sing.totalNeeded); }
+            }
+          }
+          continue;
+        } // end else (not vendor-skip-blocked)
+        }
+      }
+    }
+
+    // ── Green-craft path (vendor-purchasable shortfalls) ──
+    if (!_routeNoCrafting && (craftStatus === 'green' || craftStatus === 'gold') && invData && charData) {
+      const _recipesRaw = (craftableMap[nl] || []).filter(rec => rec.resultNameLower === nl);
+      const _recipes = _recipesRaw.slice().sort((a, b) => {
+        const aEnch = ((a.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
+        const bEnch = ((b.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
+        return aEnch - bEnch;
+      });
+      const _known = _getKnownRecipes();
+      let _greenHandled = false;
+      for (const rec of _recipes) {
+        const skillLevel = charData.Skills?.[rec.skill]?.Level ?? -1;
+        if (skillLevel < (rec.skillLevel || 0)) continue;
+        if (!_isRecipeKnown(rec, _known)) continue;
+        const craftsNeeded = Math.ceil(_craftQty / (rec.resultQty || 1));
+        const _ingInfo = [];
+        let allCovered = true;
+        for (const ing of rec.ingredients) {
+          if (ing.isDynamic) { allCovered = false; break; }
+          const totalNeeded = ing.qty * craftsNeeded;
+          const inStorage = adjTotal(ing.nameLower);
+          const shortfall = Math.max(0, totalNeeded - inStorage);
+          if (shortfall > 0) {
+            if (_routeNoPurchases || VENDOR_PURCHASE_BLOCKLIST.has(ing.nameLower)) { allCovered = false; break; }
+            const iik = gameItemKeyByName[ing.nameLower];
+            const ingVendors = iik ? (itemVendorsMap[iik] || []).filter(v => !v.isBarter && (!v.zone || !_routeSkipVendor.has(ing.nameLower + '|' + v.zone))) : [];
+            if (!ingVendors.length) { allCovered = false; break; }
+            _ingInfo.push({ ing, totalNeeded, inStorage, shortfall, vendors: ingVendors });
+          } else {
+            _ingInfo.push({ ing, totalNeeded, inStorage, shortfall: 0, vendors: [] });
+          }
+        }
+        if (!allCovered) continue;
+
+        _commitPartialPickup();
+        const jobIngredients = [];
+        let allPickupsLocal = _partialPickedUp > 0 ? false : true;
+        for (const ii of _ingInfo) {
+          const ing = ii.ing;
+          const totalNeeded = ii.totalNeeded;
+          const _greenBought = _routeBought.has(ing.nameLower) && (_routeBoughtDisplay[ing.nameLower] || {}).isIngredient;
+          if (ii.shortfall > 0 || _greenBought) {
+            const vendorQty = ii.shortfall || (_routeBoughtDisplay[ing.nameLower] || {}).qty || totalNeeded;
+            vendorNeededItems.push({ name: ing.name, nl: ing.nameLower, qty: vendorQty, vendors: ii.vendors,
+              isIngredient: true, forCraftItem: nl, forCraftItemName: r.itemDisplay, isBought: _greenBought || false });
+            if (ii.inStorage > 0) {
+              const breakdown = adjBreakdown(ing.nameLower);
+              let needed = ii.inStorage;
+              for (const b of breakdown) {
+                if (needed <= 0) break;
+                const take = Math.min(b.qty, needed);
+                if (isPortableVault(b)) { needed -= take; continue; }
+                const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+                if (bZone !== delivZone) allPickupsLocal = false;
+                const st = ensureStop(bZone);
+                st.pickups.push({ name: ing.name, nameLower: ing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true });
+                st.isGather = true;
+                needed -= take;
+              }
+            }
+            jobIngredients.push({ name: ing.name, nameLower: ing.nameLower, totalNeeded, breakdown: ii.inStorage > 0 ? adjBreakdown(ing.nameLower) : [],
+              needsVendorBuy: vendorQty, vendorZones: ii.vendors.map(v => v.zone), isPurchased: _greenBought });
+            allPickupsLocal = false;
+          } else {
+            const breakdown = adjBreakdown(ing.nameLower);
+            jobIngredients.push({ name: ing.name, nameLower: ing.nameLower, totalNeeded, breakdown });
+            let needed = totalNeeded;
+            for (const b of breakdown) {
+              if (needed <= 0) break;
+              const take = Math.min(b.qty, needed);
+              if (isPortableVault(b)) { needed -= take; continue; }
+              const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+              if (bZone !== delivZone) allPickupsLocal = false;
+              const st = ensureStop(bZone);
+              const pickupName = b.isSub ? (gameDataCased[b.subName] || b.subName) : ing.name;
+              const pickupNl   = b.isSub ? b.subName : ing.nameLower;
+              st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, needsFill: b.isSub ? b.subNote : null });
+              if (b.isSub) st.hasFillStep = true;
+              st.isGather = true;
+              needed -= take;
+            }
+          }
+        }
+        if (allPickupsLocal) {
+          ensureStop(delivZone).localCrafts.push({ r, rec, craftsNeeded, ingredients: jobIngredients, hasVendorIngredients: true });
+          ensureStop(delivZone).isGather = true;
+        } else {
+          const ingredientZones = new Set();
+          jobIngredients.forEach(jing => {
+            (jing.breakdown || []).filter(b => !isPortableVault(b)).forEach(b => {
+              ingredientZones.add(vaultToZone(b.vaultKey) || b.zone || 'Unknown');
+            });
+            if (jing.vendorZones) jing.vendorZones.forEach(z => { if (z && z !== '—') ingredientZones.add(z); });
+          });
+          for (const iz of [...ingredientZones]) { if (!stops[iz]) ingredientZones.delete(iz); }
+          craftJobs.push({ r, rec, craftsNeeded, ingredients: jobIngredients, ingredientZones, delivZone, hasVendorIngredients: true });
+          ensureStop(delivZone).deliveries.push({ r, readyNote: 'after crafting', qty: r.qtyNeeded });
+        }
+        for (const ii of _ingInfo) {
+          if (!_routeBought.has(ii.ing.nameLower)) {
+            commitReservation(ii.ing.nameLower, Math.min(ii.inStorage, ii.totalNeeded));
+          }
+        }
+        _greenHandled = true;
+        break;
+      }
+      if (_greenHandled) continue;
+    }
+
+    // ── Items in storage (full) ──
+    if (invData) {
+      const breakdown = adjBreakdown(nl);
+      const totalAll = breakdown.reduce((s, b) => s + b.qty, 0);
+      if (totalAll >= r.qtyNeeded) {
+        let needed = r.qtyNeeded;
+        let allLocal = true;
+        for (const b of breakdown) {
+          if (needed <= 0) break;
+          const take = Math.min(b.qty, needed);
+          if (isPortableVault(b)) { needed -= take; continue; }
+          const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+          if (bZone !== delivZone) allLocal = false;
+          const st = ensureStop(bZone);
+          st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: false });
+          st.isGather = true;
+          needed -= take;
+        }
+        ensureStop(delivZone).deliveries.push({ r, readyNote: allLocal ? 'picked up here ✓' : 'from storage', qty: r.qtyNeeded });
+        commitReservation(nl, r.qtyNeeded);
+        continue;
+      }
+      // Partial storage + vendor
+      if (totalAll > 0 && !_routeNoPurchases && !VENDOR_PURCHASE_BLOCKLIST.has(nl)) {
+        const ik = gameItemKeyByName[nl];
+        const vendors = ik ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter) : [];
+        if (vendors.length > 0) {
+          const shortfall = r.qtyNeeded - totalAll;
+          let needed = totalAll;
+          for (const b of breakdown) {
+            if (needed <= 0) break;
+            const take = Math.min(b.qty, needed);
+            if (isPortableVault(b)) { needed -= take; continue; }
+            const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
+            const st = ensureStop(bZone);
+            st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: false });
+            st.isGather = true;
+            needed -= take;
+          }
+          vendorNeededItems.push({ name: r.itemDisplay, nl, qty: shortfall, vendors });
+          ensureStop(delivZone).deliveries.push({ r, readyNote: 'storage + vendor', qty: r.qtyNeeded });
+          commitReservation(nl, totalAll);
+          continue;
+        }
+      }
+    }
+
+    // ── Vendor-only ──
+    {
+      const ik = gameItemKeyByName[nl];
+      const vendors = (ik && !VENDOR_PURCHASE_BLOCKLIST.has(nl) && !_routeNoPurchases) ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter) : [];
+      if (vendors.length > 0) {
+        const vendorZones = vendors.map(v => v.zone).filter(z => z && z !== '—');
+        const allSkipped = vendorZones.length > 0 && vendorZones.every(z => _routeSkipVendor.has(nl + '|' + z));
+        if (!_routeSkipRequired.has(nl) && !allSkipped) {
+          ensureStop(delivZone).deliveries.push({ r, readyNote: 'buy from vendor', qty: r.qtyNeeded });
+          vendorNeededItems.push({ name: r.itemDisplay, nl, qty: r.qtyNeeded, vendors });
+          continue;
+        } else {
+          vendorNeededItems.push({ name: r.itemDisplay, nl, qty: r.qtyNeeded, vendors, isSkipped: true });
+        }
+      }
+    }
+
+    unavailable.push({ r, reason: 'not obtainable' });
   }
 
-  // Order zones by travel order — no gather/delivery split.
-  // Sub-zones sort right after their parent so the player handles everything
-  // in one area before moving on (e.g. Serbule pickup → Myconian Caverns turn-in → next zone).
-  const allZones = Object.keys(stops);
-  allZones.sort((a, b) => {
+  // ── Order zones: gather first, then delivery-only, by canonical zone order ──
+  const orderedZones = Object.keys(stops).sort((a, b) => {
+    const aG = stops[a].isGather, bG = stops[b].isGather;
+    if (aG !== bG) return aG ? -1 : 1;
     const aParent = ZONE_PARENT[a], bParent = ZONE_PARENT[b];
     let ai = ROUTE_ZONE_ORDER.indexOf(aParent || a);
     let bi = ROUTE_ZONE_ORDER.indexOf(bParent || b);
     if (ai === -1) ai = 999;
     if (bi === -1) bi = 999;
-    // Parent sorts before its children; children sort after parent at +0.5
     if (aParent && ai < 999) ai += 0.5;
     if (bParent && bi < 999) bi += 0.5;
     return ai - bi;
   });
-  const orderedZones = allZones;
 
-  return { stops, orderedZones, unavailable };
+  // ── Post-process craft jobs ──
+  const zoneRank = {};
+  orderedZones.forEach((z, i) => { zoneRank[z] = i; });
+
+  // Build vendor zone set per craft item for ordering
+  const vendorZonesByCraftNl = {};
+  for (const vi of vendorNeededItems) {
+    if (vi.isIngredient && vi.forCraftItem && !vi.isSkipped) {
+      if (!vendorZonesByCraftNl[vi.forCraftItem]) vendorZonesByCraftNl[vi.forCraftItem] = new Set();
+      // If bought, use the bought zone; otherwise use vendor zones on the route
+      const boughtZone = vi.isBought ? (_routeBoughtDisplay[vi.nl] || {}).zone : null;
+      if (boughtZone && zoneRank[boughtZone] !== undefined) {
+        vendorZonesByCraftNl[vi.forCraftItem].add(boughtZone);
+      } else {
+        for (const v of (vi.vendors || [])) {
+          if (v.zone && v.zone !== '—' && zoneRank[v.zone] !== undefined) vendorZonesByCraftNl[vi.forCraftItem].add(v.zone);
+        }
+      }
+    }
+  }
+
+  const finalCraftJobs = [];
+  for (const job of craftJobs) {
+    // If craft has vendor ingredients, verify at least one vendor zone is on the route and not skipped
+    if (job.hasVendorIngredients) {
+      const craftNl = (job.r.itemDisplay || job.r.name || '').toLowerCase();
+      const vZones = vendorZonesByCraftNl[craftNl];
+      if (!vZones || vZones.size === 0) {
+        // No vendor zone on route — drop this craft, remove all related pickups/deliveries
+        for (const [z, sd] of Object.entries(stops)) {
+          sd.pickups = sd.pickups.filter(p => !(p.isIngredient && p.forQuest === job.r.questName));
+          const di = sd.deliveries.findIndex(d => d.r === job.r && d.readyNote === 'after crafting');
+          if (di !== -1) sd.deliveries.splice(di, 1);
+        }
+        unavailable.push({ r: job.r, reason: 'vendor ingredients not on route' });
+        continue;
+      }
+    }
+    let lastZone = null, lastRank = -1;
+    for (const z of job.ingredientZones) {
+      const rank = zoneRank[z] ?? 9999;
+      if (rank > lastRank) { lastRank = rank; lastZone = z; }
+    }
+    // Also consider vendor buy zones for ordering
+    const craftNl = (job.r.itemDisplay || job.r.name || '').toLowerCase();
+    const vZones = vendorZonesByCraftNl[craftNl];
+    if (vZones) {
+      for (const z of vZones) {
+        const rank = zoneRank[z] ?? 9999;
+        if (rank > lastRank) { lastRank = rank; lastZone = z; }
+      }
+    }
+    job.lastIngredientZone = lastZone || job.delivZone;
+    if (job.lastIngredientZone === job.delivZone) {
+      const st = stops[job.delivZone];
+      const di = st.deliveries.findIndex(d => d.r === job.r && d.readyNote === 'after crafting');
+      if (di !== -1) st.deliveries.splice(di, 1);
+      st.localCrafts.push({ r: job.r, rec: job.rec, craftsNeeded: job.craftsNeeded, ingredients: job.ingredients, subCrafts: job.subCrafts });
+    } else {
+      const delivRank = zoneRank[job.delivZone] ?? 9999;
+      job.isReturnTrip = delivRank < lastRank;
+      // If craft is after delivery zone, move the delivery to appear after the craft
+      if (delivRank < lastRank && stops[job.delivZone]) {
+        const st = stops[job.delivZone];
+        const di = st.deliveries.findIndex(d => d.r === job.r && d.readyNote === 'after crafting');
+        if (di !== -1) {
+          st.deliveries.splice(di, 1);
+          // Add delivery at craft zone as a deferred turn-in
+          job.deferredDelivery = { r: job.r, readyNote: 'after crafting', qty: job.r.qtyNeeded, deferredFrom: job.delivZone };
+        }
+      }
+      finalCraftJobs.push(job);
+    }
+  }
+
+  // ── Post-process localCrafts with vendor ingredients ──
+  for (const [zone, data] of Object.entries(stops)) {
+    data.localCrafts = data.localCrafts.filter(lc => {
+      if (!lc.hasVendorIngredients) return true;
+      const craftNl = (lc.r.itemDisplay || lc.r.name || '').toLowerCase();
+      const vZones = vendorZonesByCraftNl[craftNl];
+      if (!vZones || vZones.size === 0) {
+        // Remove all related pickups/deliveries from all stops
+        for (const [z2, sd] of Object.entries(stops)) {
+          sd.pickups = sd.pickups.filter(p => !(p.isIngredient && p.forQuest === lc.r.questName));
+          const di = sd.deliveries.findIndex(d => d.r === lc.r);
+          if (di !== -1) sd.deliveries.splice(di, 1);
+        }
+        unavailable.push({ r: lc.r, reason: 'vendor ingredients not on route' });
+        return false;
+      }
+      return true;
+    });
+  }
+
+  // ── Build item pickup rank for turn-in deferral ──
+  const itemPickupRankByNl = {};
+  for (const [zone, data] of Object.entries(stops)) {
+    const rank = zoneRank[zone] ?? 9999;
+    for (const p of data.pickups) {
+      if (p.nameLower && (itemPickupRankByNl[p.nameLower] === undefined || rank > itemPickupRankByNl[p.nameLower])) {
+        itemPickupRankByNl[p.nameLower] = rank;
+      }
+    }
+  }
+
+  return { stops, orderedZones, unavailable, craftJobs: finalCraftJobs, vendorNeededItems, zoneRank, itemPickupRankByNl };
 }
 
-function renderQuestRouteHtml({ stops, orderedZones, unavailable }) {
+function renderQuestRouteHtml(routeData) {
+  const { stops, orderedZones, unavailable, craftJobs, vendorNeededItems, zoneRank, itemPickupRankByNl } = routeData;
   const esc2 = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const escArg = s => "'" + String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'") + "'";
+  const gold = '#c8a84b';
   const sec = [];
-  const totalQuests = orderedZones.reduce((s, z) => s + stops[z].deliveries.length, 0);
-  const readyCount = orderedZones.reduce((s, z) => s + stops[z].deliveries.filter(d => d.readyNote === 'on person ✓').length, 0);
-  const storageCount = orderedZones.reduce((s, z) => s + stops[z].deliveries.filter(d => d.readyNote === 'from storage').length, 0);
 
-  // Summary bar — clickable filters
+  // ── Counts ──
+  let delivCount = 0, readyCount = 0, craftCount = 0, storageCount = 0;
+  orderedZones.forEach(z => {
+    const d = stops[z];
+    delivCount += d.deliveries.length;
+    readyCount += d.deliveries.filter(dd => dd.readyNote === 'on person ✓').length;
+    storageCount += d.deliveries.filter(dd => dd.readyNote === 'from storage' || dd.readyNote === 'picked up here ✓' || dd.readyNote === 'storage + vendor').length;
+    craftCount += d.localCrafts.length;
+  });
+  craftCount += craftJobs.length;
+
+  // ── Summary ──
+  sec.push(`<div style="padding:12px 18px;background:rgba(200,168,75,.07);border-bottom:1px solid var(--border-dim);font-size:12px;line-height:1.8;">
+    <span style="color:${gold};font-weight:bold;">📊</span>
+    <span style="color:#90c0f0;">📍 ${orderedZones.length} stop${orderedZones.length !== 1 ? 's' : ''}</span> ·
+    <span style="color:#5fcaaa;">✅ ${delivCount + craftCount} quest item${(delivCount + craftCount) !== 1 ? 's' : ''}</span>
+    ${readyCount ? ` · <span style="color:#5fcaaa;">👜 ${readyCount} ready</span>` : ''}
+    ${craftCount ? ` · <span style="color:${gold};">🔨 ${craftCount} craft</span>` : ''}
+    ${unavailable.length ? ` · <span style="color:#e06c75;">⚠ ${unavailable.length} unavailable</span>` : ''}
+  </div>`);
+
+  // ── Route options ──
+  {
+    const btnBase = `font-family:Georgia,serif;font-size:11px;padding:4px 12px;border-radius:4px;cursor:pointer;border:1px solid;`;
+    const checkStyle = (on) => on ? 'background:rgba(224,108,117,.15);border-color:#e06c75;color:#e06c75;font-weight:bold;' : 'background:transparent;border-color:var(--border-dim);color:var(--text-dim);';
+    sec.push(`<div style="padding:7px 18px;border-bottom:1px solid var(--border-dim);display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:10px;color:var(--text-dim);margin-right:2px;">⚙ Route:</span>
+      <button style="${btnBase}${checkStyle(_routeNoCrafting)}" onclick="routeToggleNoCrafting()">${_routeNoCrafting ? '☑' : '☐'} No Crafting</button>
+      <button style="${btnBase}${checkStyle(_routeNoPurchases)}" onclick="routeToggleNoPurchases()">${_routeNoPurchases ? '☑' : '☐'} No NPC Purchases</button>
+      ${(_routeBought.size || _routeSkipVendor.size) ? `<span style="color:var(--border-dim);margin:0 4px;">│</span><button style="${btnBase}background:rgba(100,100,100,.15);border-color:#666;color:#999;" onclick="routeResetActions()">↩ Reset</button>` : ''}
+    </div>`);
+  }
+
+  // ── Filter bar ──
   const fAll     = _questRouteFilter === 'all';
   const fReady   = _questRouteFilter === 'ready';
   const fStorage = _questRouteFilter === 'storage';
-  const btnBase = 'cursor:pointer;border:1px solid;border-radius:4px;padding:4px 12px;font-family:Georgia,serif;font-size:12px;transition:background .15s;';
-  const btnStyle = (on, color) => on
-    ? `${btnBase}border-color:${color};color:${color};background:rgba(255,255,255,.08);font-weight:bold;box-shadow:0 0 4px rgba(200,168,75,.15);`
-    : `${btnBase}border-color:var(--border);color:var(--text-dim);background:transparent;`;
+  const fbBase = 'cursor:pointer;border:1px solid;border-radius:4px;padding:4px 12px;font-family:Georgia,serif;font-size:12px;transition:background .15s;';
+  const fbStyle = (on, color) => on
+    ? `${fbBase}border-color:${color};color:${color};background:rgba(255,255,255,.08);font-weight:bold;box-shadow:0 0 4px rgba(200,168,75,.15);`
+    : `${fbBase}border-color:var(--border);color:var(--text-dim);background:transparent;`;
+  const totalFilterable = delivCount + craftCount;
   sec.push(`<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-dim);">
     <span style="color:var(--text-dim);font-size:11px;margin-right:2px;">Filter:</span>
-    <button style="${btnStyle(fAll, 'var(--text)')}" onclick="questRouteSetFilter('all')">📜 All <strong>${totalQuests}</strong></button>
-    ${readyCount ? `<button style="${btnStyle(fReady, '#5fcaaa')}" onclick="questRouteSetFilter('ready')">✓ Ready Now <strong>${readyCount}</strong></button>` : ''}
-    ${storageCount ? `<button style="${btnStyle(fStorage, '#c8a84b')}" onclick="questRouteSetFilter('storage')">📦 Need Pickup <strong>${storageCount}</strong></button>` : ''}
-    ${unavailable.length ? `<span style="color:#e06c75;margin-left:4px;">⚠ <strong>${unavailable.length}</strong> unavailable</span>` : ''}
+    <button style="${fbStyle(fAll, 'var(--text)')}" onclick="questRouteSetFilter('all')">📜 All <strong>${totalFilterable}</strong></button>
+    ${readyCount ? `<button style="${fbStyle(fReady, '#5fcaaa')}" onclick="questRouteSetFilter('ready')">✓ Ready Now <strong>${readyCount}</strong></button>` : ''}
+    ${(storageCount || craftCount) ? `<button style="${fbStyle(fStorage, '#c8a84b')}" onclick="questRouteSetFilter('storage')">📦 Need Action <strong>${storageCount + craftCount}</strong></button>` : ''}
   </div>`);
 
   if (orderedZones.length === 0 && unavailable.length === 0) {
@@ -7266,59 +7808,214 @@ function renderQuestRouteHtml({ stops, orderedZones, unavailable }) {
     return sec.join('');
   }
 
-  // Track which items will be picked up at earlier stops (for ready-status coloring)
-  const pickedUpItems = new Set();
+  // ── Vendor buy locations ──
+  // Build a map: zone → [vendorNeededItem entries] — one zone per item, only at zones already on the route
+  const vendorByZone = {};
+  const existingZoneSet = new Set(orderedZones);
+  for (const vi of vendorNeededItems) {
+    if (vi.isSkipped) continue;
+    const isBought = _routeBought.has(vi.nl);
+    const boughtZone = isBought ? (_routeBoughtDisplay[vi.nl] || {}).zone : null;
+    if (isBought && boughtZone && existingZoneSet.has(boughtZone)) {
+      const matchV = vi.vendors.find(v => v.zone === boughtZone);
+      if (matchV) {
+        if (!vendorByZone[boughtZone]) vendorByZone[boughtZone] = [];
+        vendorByZone[boughtZone].push({ ...vi, vendorNpc: matchV.name, vendorZone: boughtZone });
+      }
+      continue;
+    }
+    // Pick the earliest unskipped vendor zone on the route (by route order)
+    const sortedVendors = vi.vendors.filter(v => v.zone && v.zone !== '—' && existingZoneSet.has(v.zone) && !_routeSkipVendor.has(vi.nl + '|' + v.zone))
+      .sort((a, b) => (zoneRank[a.zone] ?? 9999) - (zoneRank[b.zone] ?? 9999));
+    if (sortedVendors.length) {
+      const v = sortedVendors[0];
+      if (!vendorByZone[v.zone]) vendorByZone[v.zone] = [];
+      vendorByZone[v.zone].push({ ...vi, vendorNpc: v.name, vendorZone: v.zone });
+    }
+  }
 
+  // ── Ingredient detail renderer ──
+  function renderIngDetail(ingredients) {
+    if (!ingredients || !ingredients.length) return '';
+    return `<div style="margin:2px 0 0 16px;font-size:11px;color:var(--text-dim);">${
+      ingredients.map(ing => {
+        if (ing.isPurchased) return `<div>└ ${esc2(ing.name)} ×${ing.totalNeeded} — purchased ✓</div>`;
+        if (ing.isCrafted) {
+          const storePart = ing.inStorageQty > 0 ? `${ing.inStorageQty} in storage + ` : '';
+          return `<div>└ ${esc2(ing.name)} ×${ing.totalNeeded} — ${storePart}craft ${ing.craftedQty}</div>`;
+        }
+        if (ing.needsVendorBuy) {
+          const storePart = ing.inStorageQty > 0 ? `${ing.inStorageQty} in storage + ` : '';
+          return `<div>└ ${esc2(ing.name)} ×${ing.totalNeeded} — ${storePart}🛒 buy ${ing.needsVendorBuy} from vendor</div>`;
+        }
+        // Regular storage ingredient
+        const locs = (ing.breakdown || []).filter(b => !isPortableVault(b)).map(b => `${friendlyVault(b.vault || b.vaultKey)} (${b.qty})`);
+        const portable = (ing.breakdown || []).filter(b => isPortableVault(b)).reduce((s, b) => s + b.qty, 0);
+        if (portable > 0) locs.push(`on person (${portable})`);
+        return `<div>└ ${esc2(ing.name)} ×${ing.totalNeeded}${locs.length ? ' — ' + locs.join(', ') : ''}</div>`;
+      }).join('')
+    }</div>`;
+  }
+
+  // ── Craft step renderer ──
+  function renderCraftSteps(localCrafts) {
+    return localCrafts.slice().sort((a, b) => {
+      const sa = a.rec.skill || '', sb = b.rec.skill || '';
+      return sa < sb ? -1 : sa > sb ? 1 : (a.r.itemDisplay || a.r.name || '').localeCompare(b.r.itemDisplay || b.r.name || '');
+    }).map(({ r, rec, craftsNeeded, ingredients, subCrafts }) => {
+      const skillStr = `${rec.skill} Lvl ${rec.skillLevel}`;
+      const subHtml = (subCrafts || []).map(sc => {
+        const scIngDetail = renderIngDetail(sc.ingredients);
+        return `<div style="padding:3px 0 3px 8px;font-size:12px;border-left:2px solid #5a8ade;margin:2px 0;">
+          ⚙️ <span style="color:#5a8ade;font-weight:bold;">${esc2(sc.resultName)}</span>
+          <span style="color:var(--text-dim);"> — ${sc.craftsNeeded} craft${sc.craftsNeeded !== 1 ? 's' : ''}</span>${scIngDetail}
+        </div>`;
+      }).join('');
+      const ingDetail = renderIngDetail(ingredients);
+      return `${subHtml}<div style="padding:4px 0 4px 8px;font-size:12px;border-left:2px solid ${gold};margin:2px 0;">
+        🔨 <span style="color:${gold};font-weight:bold;">${esc2(r.itemDisplay || r.name)}</span>
+        <span style="color:var(--text-dim);"> — ${craftsNeeded} craft${craftsNeeded !== 1 ? 's' : ''}</span>
+        <span style="font-size:11px;color:var(--text-dim);"> · ${esc2(skillStr)}</span>${ingDetail}
+      </div>`;
+    }).join('');
+  }
+
+  const craftedJobs = new Set();
   let stopIdx = 0;
-  orderedZones.forEach(zone => {
+  orderedZones.forEach((zone, idx) => {
     const data = stops[zone];
     const lines = [];
     stopIdx++;
 
-    // Apply delivery filter
-    const filteredDeliveries = fAll ? data.deliveries
-      : fReady ? data.deliveries.filter(d => d.readyNote === 'on person ✓')
-      : data.deliveries.filter(d => d.readyNote === 'from storage');
+    const hasLocalCrafts = data.localCrafts.length > 0;
+    const hasPickups = data.pickups.length > 0;
 
-    // Skip zone entirely if filter removes all deliveries and there are no relevant pickups
-    const showPickups = !fReady && data.pickups.length > 0; // hide pickups in "ready now" mode
-    if (!filteredDeliveries.length && !showPickups) return;
+    // Vendor buys at this zone
+    const zoneBuys = vendorByZone[zone] || [];
+    const seenVendorNl = new Set();
+    const uniqueZoneBuys = zoneBuys.filter(vb => {
+      if (seenVendorNl.has(vb.nl)) return false;
+      if (_routeSkipVendor.has(vb.nl + '|' + zone)) return false;
+      seenVendorNl.add(vb.nl);
+      return true;
+    });
 
-    // Pickups — grouped by storage location
+    // Filter deliveries
+    const readyDeliveries = data.deliveries.filter(d =>
+      d.readyNote !== 'after crafting' &&
+      (d.readyNote !== 'buy from vendor' || _routeBought.has(d.r.itemDisplay.toLowerCase())));
+    const craftedDeliveries = data.deliveries.filter(d =>
+      d.readyNote === 'after crafting' && craftJobs.some(j => j.r === d.r && craftedJobs.has(j)));
+    const localCraftedDeliveries = data.localCrafts.map(lc => ({ r: lc.r, readyNote: 'crafted ✓', qty: lc.r.qtyNeeded }));
+    const allDeliveries = [...readyDeliveries, ...localCraftedDeliveries, ...craftedDeliveries];
+
+    // Apply filter
+    const filteredDeliveries = fAll ? allDeliveries
+      : fReady ? allDeliveries.filter(d => d.readyNote === 'on person ✓')
+      : allDeliveries.filter(d => d.readyNote !== 'on person ✓');
+
+    const showPickups = !fReady && hasPickups;
+    const showCrafts  = !fReady && hasLocalCrafts;
+    const showVendors = !fReady && uniqueZoneBuys.length > 0;
+
+    if (!filteredDeliveries.length && !showPickups && !showCrafts && !showVendors) return;
+
+    // ── Vendor buys ──
+    if (showVendors) {
+      lines.push(`<div style="font-size:10px;color:#e8c44a;font-weight:bold;margin-bottom:2px;letter-spacing:.3px;">🛒 BUY FROM VENDORS:</div>`);
+      for (const vb of uniqueZoneBuys) {
+        const nl = escArg(vb.nl);
+        const nameEsc = escArg(vb.name);
+        const zoneEsc = escArg(zone);
+        const isBought = _routeBought.has(vb.nl);
+        if (isBought) {
+          const boughtZone = (_routeBoughtDisplay[vb.nl] || {}).zone;
+          if (boughtZone && boughtZone !== zone) continue;
+          lines.push(`<div style="padding:3px 0 3px 8px;margin:2px 0;border-left:2px solid #5fcaaa;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="flex:1;font-size:12px;">🛒 <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty} — purchased ✓</span></div>
+              <div style="flex-shrink:0;"><button style="cursor:pointer;border:1px solid #666;border-radius:3px;padding:2px 7px;font-size:10px;background:rgba(100,100,100,.15);color:#999;" onclick="routeUndoDone(${nl})">↩ Undo</button></div>
+            </div>
+          </div>`);
+        } else {
+          const icon = vb.isIngredient ? '🧂' : '🛒';
+          const borderColor = vb.isIngredient ? '#e8c44a' : '#e06c75';
+          const forStr = vb.forCraftItemName
+            ? `<div style="font-size:10px;color:#a08858;margin-top:1px;">ingredient for: <span style="color:#c8a84b;font-style:italic;">${esc2(vb.forCraftItemName)}</span></div>`
+            : '';
+          lines.push(`<div style="padding:3px 0 3px 8px;margin:2px 0;border-left:2px solid ${borderColor};">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="flex:1;font-size:12px;">${icon} <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty}</span> — <span style="color:#c8a84b;">${esc2(vb.vendorNpc)}</span></div>
+              <div style="flex-shrink:0;display:flex;gap:4px;">
+                <button style="cursor:pointer;border:1px solid #5fcaaa;border-radius:3px;padding:2px 7px;font-size:10px;background:rgba(95,202,170,.15);color:#5fcaaa;" onclick="routeMarkDone(${nl},${nameEsc},${vb.qty},${zoneEsc},${!!vb.isIngredient})">🛒 Purchase here</button>
+                <button style="cursor:pointer;border:1px solid #e06c75;border-radius:3px;padding:2px 7px;font-size:10px;background:rgba(224,108,117,.1);color:#e06c75;" onclick="routeSkipVendor(${nl},${zoneEsc})">✗ Skip</button>
+              </div>
+            </div>${forStr}
+          </div>`);
+        }
+      }
+    }
+
+    // ── Pickups ──
     if (showPickups) {
       const byVault = {};
       for (const p of data.pickups) {
-        pickedUpItems.add(p.nameLower);
         const vk = p.vault || '?';
         if (!byVault[vk]) byVault[vk] = [];
         byVault[vk].push(p);
       }
-      lines.push(`<div style="font-size:10px;color:#90c0f0;font-weight:bold;margin-bottom:2px;letter-spacing:.3px;">📦 PICK UP FROM STORAGE:</div>`);
+      lines.push(`<div style="font-size:10px;color:#90c0f0;font-weight:bold;margin:${showVendors ? '6' : '0'}px 0 2px;letter-spacing:.3px;">📦 PICK UP FROM STORAGE:</div>`);
       for (const [vk, items] of Object.entries(byVault)) {
+        const itemLines = items.map(p => {
+          const borderColor = p.isIngredient ? '#5a8ade' : '#5fcaaa';
+          const icon = '📦';
+          const forStr = p.isIngredient
+            ? ` <span style="font-size:10px;color:var(--text-dim);"> — ingredient</span>` : '';
+          return `<div style="padding:3px 12px;border-left:2px solid ${borderColor};"><div style="font-size:12px;">${icon} <span style="color:var(--text);font-weight:bold;">${esc2(p.name)}</span> <span style="color:#5fcaaa;"> ×${p.qty}</span>${forStr}</div></div>`;
+        }).join('');
         lines.push(`<div style="margin:3px 0 3px 8px;border:1px solid rgba(144,192,240,.25);border-radius:4px;overflow:hidden;">
-          <div style="padding:3px 8px;background:rgba(144,192,240,.08);font-size:11px;color:#90c0f0;font-weight:bold;">${esc2(friendlyVault(vk))}</div>
-          ${items.map(p => `<div style="padding:2px 12px;font-size:12px;">
-            <span style="color:var(--text);">${esc2(p.name)}</span> <span style="color:#5fcaaa;">×${p.qty}</span>
-          </div>`).join('')}
+          <div style="padding:3px 8px;background:rgba(144,192,240,.08);font-size:11px;color:#90c0f0;font-weight:bold;">${esc2(friendlyVault(vk))}</div>${itemLines}
         </div>`);
       }
     }
 
-    // Turn-ins grouped by NPC
-    const delivByNpc = {};
-    for (const d of filteredDeliveries) {
-      const npc = d.r.npc || '—';
-      if (!delivByNpc[npc]) delivByNpc[npc] = [];
-      delivByNpc[npc].push(d);
+    // ── Local crafts ──
+    if (showCrafts) {
+      lines.push(`<div style="margin-top:5px;padding-top:4px;border-top:1px dashed var(--border-dim);">
+        <div style="font-size:10px;color:${gold};font-weight:bold;margin-bottom:2px;letter-spacing:.3px;">🔨 CRAFT HERE:</div>
+        ${renderCraftSteps(data.localCrafts)}
+      </div>`);
     }
-    if (Object.keys(delivByNpc).length) {
-      lines.push(`<div style="font-size:10px;color:#5fcaaa;font-weight:bold;margin:${data.pickups.length ? '6' : '0'}px 0 2px;letter-spacing:.3px;">📜 TURN IN:</div>`);
+
+    // ── Craft NOW — multi-zone craft jobs whose last ingredient zone is this stop ──
+    const nowCraftable = craftJobs.filter(j => j.lastIngredientZone === zone && !craftedJobs.has(j));
+    if (nowCraftable.length && !fReady) {
+      nowCraftable.forEach(j => craftedJobs.add(j));
+      lines.push(`<div style="margin-top:5px;padding-top:4px;border-top:1px dashed var(--border-dim);">
+        <div style="font-size:10px;color:${gold};font-weight:bold;margin-bottom:2px;letter-spacing:.3px;">🔨 CRAFT NOW — all ingredients in hand:</div>
+        ${renderCraftSteps(nowCraftable)}
+      </div>`);
+    }
+
+    // ── Turn-ins ──
+    if (filteredDeliveries.length) {
+      const delivByNpc = {};
+      for (const d of filteredDeliveries) {
+        const npc = d.r.npc || '—';
+        if (!delivByNpc[npc]) delivByNpc[npc] = [];
+        delivByNpc[npc].push(d);
+      }
+      lines.push(`<div style="font-size:10px;color:#5fcaaa;font-weight:bold;margin:${(hasPickups || hasLocalCrafts) ? '6' : '0'}px 0 2px;letter-spacing:.3px;">📜 TURN IN:</div>`);
       for (const [npc, delivs] of Object.entries(delivByNpc)) {
         for (const d of delivs) {
-          lines.push(`<div style="padding:2px 0 2px 8px;margin:1px 0;border-left:2px solid #5fcaaa;font-size:12px;">
+          const isReady = d.readyNote === 'on person ✓' || d.readyNote === 'picked up here ✓' || d.readyNote === 'crafted ✓' || d.readyNote === 'purchased ✓';
+          const noteColor = isReady ? '#5fcaaa' : 'var(--text-dim)';
+          const borderCol = isReady ? '#5fcaaa' : 'var(--border)';
+          lines.push(`<div style="padding:2px 0 2px 8px;margin:1px 0;border-left:2px solid ${borderCol};font-size:12px;">
             <span style="color:#c8a84b;font-weight:bold;">${esc2(npc)}</span>
             <span style="color:var(--text-dim);"> — </span>
-            <span style="color:var(--text);font-weight:bold;">${esc2(d.r.itemDisplay)}</span> <span style="color:#5fcaaa;">×${d.qty}</span>
+            <span style="color:var(--text);font-weight:bold;">${esc2(d.r.itemDisplay)}</span> <span style="color:#5fcaaa;">×${d.qty || d.r.qtyNeeded}</span>
+            <span style="color:${noteColor};font-size:11px;"> (${esc2(d.readyNote)})</span>
           </div>`);
         }
       }
@@ -7333,17 +8030,51 @@ function renderQuestRouteHtml({ stops, orderedZones, unavailable }) {
     </div>`);
   });
 
+  // ── Deferred turn-in stops — crafts where the NPC zone was earlier in the route ──
+  const deferredJobs = craftJobs.filter(j => j.deferredDelivery && craftedJobs.has(j));
+  if (deferredJobs.length && !fReady) {
+    // Group by delivery zone
+    const deferByZone = {};
+    for (const j of deferredJobs) {
+      const dz = j.deferredDelivery.deferredFrom || j.delivZone;
+      if (!deferByZone[dz]) deferByZone[dz] = [];
+      deferByZone[dz].push(j);
+    }
+    for (const [dz, jobs] of Object.entries(deferByZone)) {
+      stopIdx++;
+      const dLines = [];
+      dLines.push(`<div style="font-size:10px;color:#5fcaaa;font-weight:bold;margin-bottom:2px;letter-spacing:.3px;">📜 TURN IN:</div>`);
+      for (const j of jobs) {
+        const npc = j.r.npc || '—';
+        dLines.push(`<div style="padding:2px 0 2px 8px;margin:1px 0;border-left:2px solid #5fcaaa;font-size:12px;">
+          <span style="color:#c8a84b;font-weight:bold;">${esc2(npc)}</span>
+          <span style="color:var(--text-dim);"> — </span>
+          <span style="color:var(--text);font-weight:bold;">${esc2(j.r.itemDisplay)}</span> <span style="color:#5fcaaa;">×${j.r.qtyNeeded}</span>
+          <span style="color:#5fcaaa;font-size:11px;"> (crafted ✓)</span>
+        </div>`);
+      }
+      sec.push(`<div style="padding:8px 18px 10px;border-bottom:1px solid var(--border-dim);">
+        <div style="font-size:12px;color:#90c0f0;font-weight:bold;margin-bottom:5px;">📍 Stop ${stopIdx} — <span style="color:var(--text);">${esc2(dz)}</span></div>
+        ${dLines.join('')}
+      </div>`);
+    }
+  }
+
   // Unavailable section
   if (unavailable.length) {
     sec.push(`<div style="padding:8px 18px 10px;border-bottom:1px solid var(--border-dim);opacity:0.6;">
-      <div style="font-size:12px;color:#e06c75;font-weight:bold;margin-bottom:5px;">⚠ Unavailable — items not in inventory</div>
-      ${unavailable.map(u => `<div style="padding:2px 0 2px 8px;margin:1px 0;border-left:2px solid #e06c75;font-size:12px;">
-        <span style="color:var(--text);">${esc2(u.r.questName)}</span>
-        <span style="color:var(--text-dim);"> — </span>
-        <span style="color:var(--text);font-weight:bold;">${esc2(u.r.itemDisplay)}</span> <span style="color:var(--text-dim);">×${u.r.qtyNeeded}</span>
-        <span style="color:#e06c75;font-size:11px;"> — ${esc2(u.reason)}</span>
-        <div style="font-size:10px;color:var(--text-dim);margin-top:1px;">NPC: ${esc2(u.r.npc)} · ${esc2(questResolveZone(u.r) || u.r.location || '—')}</div>
-      </div>`).join('')}
+      <div style="font-size:12px;color:#e06c75;font-weight:bold;margin-bottom:5px;">⚠ Unavailable</div>
+      ${unavailable.map(u => {
+        const cs = invData ? getCraftStatus(u.r.itemDisplay.toLowerCase(), u.r.qtyNeeded) : null;
+        const hint = cs === 'blue' ? ' (recipe not learned)' : cs === 'red' ? ' (skill too low)' : '';
+        return `<div style="padding:2px 0 2px 8px;margin:1px 0;border-left:2px solid #e06c75;font-size:12px;">
+          <span style="color:var(--text);">${esc2(u.r.questName)}</span>
+          <span style="color:var(--text-dim);"> — </span>
+          <span style="color:var(--text);font-weight:bold;">${esc2(u.r.itemDisplay)}</span> <span style="color:var(--text-dim);">×${u.r.qtyNeeded}</span>
+          <span style="color:#e06c75;font-size:11px;"> — ${esc2(u.reason)}${hint}</span>
+          <div style="font-size:10px;color:var(--text-dim);margin-top:1px;">NPC: ${esc2(u.r.npc)} · ${esc2(questResolveZone(u.r) || u.r.location || '—')}</div>
+        </div>`;
+      }).join('')}
     </div>`);
   }
 
@@ -7359,27 +8090,50 @@ function questRouteSetFilter(f) {
 
 function copyQuestRouteToClipboard() {
   if (!_lastQuestRouteData) { toast('No quest route data.', true); return; }
-  const { stops, orderedZones, unavailable } = _lastQuestRouteData;
+  const { stops, orderedZones, unavailable, craftJobs } = _lastQuestRouteData;
+  const craftedJobs = new Set();
   const lines = [];
   let stopIdx = 0;
   orderedZones.forEach(zone => {
     const data = stops[zone];
-    if (!data.pickups.length && !data.deliveries.length) return;
+    if (!data.pickups.length && !data.deliveries.length && !data.localCrafts.length) return;
     stopIdx++;
     const stop = [`=== Stop ${stopIdx}: ${zone} ===`];
     const sortedPickups = [...data.pickups].sort((a, b) => (a.vault || '').localeCompare(b.vault || ''));
     for (const p of sortedPickups) {
       stop.push(`  [Pick up] ${p.name} x${p.qty} — ${friendlyVault(p.vault)}`);
     }
+    // Local crafts
+    const sortedCrafts = data.localCrafts.slice().sort((a, b) => {
+      const sa = a.rec.skill || '', sb = b.rec.skill || '';
+      return sa < sb ? -1 : sa > sb ? 1 : (a.r.itemDisplay || '').localeCompare(b.r.itemDisplay || '');
+    });
+    for (const lc of sortedCrafts) {
+      stop.push(`  [Craft] ${lc.r.itemDisplay} — ${lc.craftsNeeded} craft${lc.craftsNeeded !== 1 ? 's' : ''} (${lc.rec.skill})`);
+    }
+    // Multi-zone craft jobs whose last ingredient zone is here
+    const nowCraftable = craftJobs.filter(j => j.lastIngredientZone === zone && !craftedJobs.has(j));
+    nowCraftable.forEach(j => {
+      craftedJobs.add(j);
+      stop.push(`  [Craft NOW] ${j.r.itemDisplay} — ${j.craftsNeeded} craft${j.craftsNeeded !== 1 ? 's' : ''} (${j.rec.skill})`);
+    });
+    // Deliveries
+    const readyDeliveries = data.deliveries.filter(d =>
+      d.readyNote !== 'after crafting' &&
+      (d.readyNote !== 'buy from vendor' || _routeBought.has(d.r.itemDisplay.toLowerCase())));
+    const localCraftedDeliveries = data.localCrafts.map(lc => ({ r: lc.r, readyNote: 'crafted ✓', qty: lc.r.qtyNeeded }));
+    const craftedDeliveries = data.deliveries.filter(d =>
+      d.readyNote === 'after crafting' && craftJobs.some(j => j.r === d.r && craftedJobs.has(j)));
+    const allDeliveries = [...readyDeliveries, ...localCraftedDeliveries, ...craftedDeliveries];
     const delivByNpc = {};
-    for (const d of data.deliveries) {
+    for (const d of allDeliveries) {
       const npc = d.r.npc || '—';
       if (!delivByNpc[npc]) delivByNpc[npc] = [];
       delivByNpc[npc].push(d);
     }
     for (const [npc, delivs] of Object.entries(delivByNpc)) {
       for (const d of delivs) {
-        stop.push(`  [Turn in] ${d.r.itemDisplay} x${d.qty} → ${npc}`);
+        stop.push(`  [Turn in] ${d.r.itemDisplay} x${d.qty || d.r.qtyNeeded} → ${npc}`);
       }
     }
     lines.push(stop.join('\n'));
@@ -7495,6 +8249,7 @@ function renderQuestsTab() {
       case 'npc':      return dir * (a.npc || '').localeCompare(b.npc || '');
       case 'location': return dir * a.location.localeCompare(b.location);
       case 'item':     return dir * a.itemDisplay.localeCompare(b.itemDisplay);
+      case 'craft':    { const rank = {gold:4,green:3,blue:2,red:1}; const ac = rank[getCraftStatus(a.itemDisplay.toLowerCase(),a.qtyNeeded)] || 0; const bc = rank[getCraftStatus(b.itemDisplay.toLowerCase(),b.qtyNeeded)] || 0; return dir * (ac - bc); }
       case 'qty':      return dir * (a.qtyNeeded - b.qtyNeeded);
       case 'indlvl':   return dir * ((a.indLevel ?? 999) - (b.indLevel ?? 999));
       case 'inv': { const aq = a.invItem ? (a.invItem.StackSize || 1) : 0; const bq = b.invItem ? (b.invItem.StackSize || 1) : 0; const af = aq >= a.qtyNeeded ? 1 : 0; const bf = bq >= b.qtyNeeded ? 1 : 0; if (af !== bf) return dir * (af - bf); return dir * (aq - bq); }
@@ -7525,33 +8280,32 @@ function renderQuestsTab() {
             r.isActive ? `<span class="quest-active-badge" title="Currently active quest">●</span>` : ''
           }</td>`;
         case 'quest':
-          return `<td class="quest-td" ${s} title="${esc(r.description)}"><span style="font-weight:${r.isActive?'bold':'normal'};color:${r.isActive?'var(--gold)':'var(--text)'};">${esc(r.questName)}</span></td>`;
+          return `<td class="quest-td" ${s} title="${esc(r.description)}"><a href="https://wiki.projectgorgon.com/wiki/${encodeURIComponent(r.questName.replace(/ /g,'_'))}" target="_blank" style="font-weight:${r.isActive?'bold':'normal'};color:${r.isActive?'var(--gold)':'var(--text)'};text-decoration:none;border-bottom:1px dotted var(--text-dim);" onclick="event.stopPropagation()">${esc(r.questName)}</a></td>`;
         case 'location':
-          return `<td class="quest-td" ${s} style="width:${cw}px;min-width:${cw}px;color:var(--text-dim);">${esc(r.location)}</td>`;
+          return `<td class="quest-td" ${s} style="width:${cw}px;min-width:${cw}px;color:var(--text-dim);"><a href="https://wiki.projectgorgon.com/wiki/${encodeURIComponent(r.location.replace(/ /g,'_'))}" target="_blank" style="color:var(--text-dim);text-decoration:none;border-bottom:1px dotted var(--border-dim);" onclick="event.stopPropagation()">${esc(r.location)}</a></td>`;
         case 'npc':
-          return `<td class="quest-td" ${s} style="width:${cw}px;min-width:${cw}px;color:var(--text-dim);font-size:12px;">${esc(r.npc)}</td>`;
-        case 'item': {
+          return `<td class="quest-td" ${s} style="width:${cw}px;min-width:${cw}px;color:var(--text-dim);font-size:12px;"><a href="https://wiki.projectgorgon.com/wiki/${encodeURIComponent(r.npc.replace(/ /g,'_'))}" target="_blank" style="color:var(--text-dim);text-decoration:none;border-bottom:1px dotted var(--border-dim);" onclick="event.stopPropagation()">${esc(r.npc)}</a></td>`;
+        case 'craft': {
           const craftStatus = getCraftStatus(r.itemDisplay.toLowerCase(), r.qtyNeeded);
-          let craftBtn = '';
-          if (craftStatus !== null) {
-            const btnStyle =
-              craftStatus === 'gold'  ? 'background:#6b4e00;border-color:var(--gold);color:var(--gold);'
-            : craftStatus === 'green' ? 'background:#1a4020;border-color:#5fcaaa;color:#5fcaaa;'
-            : craftStatus === 'blue'  ? 'background:#152840;border-color:#5a8ade;color:#90c0f0;'
-            : craftStatus === 'red'   ? 'background:#4a1010;border-color:#c04040;color:#ff8888;'
-            : 'background:var(--accent);border-color:var(--gold-dim);color:var(--gold);opacity:.65;';
-            const btnTitle =
-              craftStatus === 'gold'  ? 'Ready to craft — skill OK &amp; all ingredients in storage'
-            : craftStatus === 'green' ? 'Skill OK &amp; recipe known — missing some ingredients'
-            : craftStatus === 'blue'  ? 'Skill level OK but recipe not yet learned'
-            : craftStatus === 'red'   ? 'Skill level too low for this recipe'
-            : 'View crafting recipe (load character for skill check)';
-            craftBtn = ` <button class="btn" style="font-size:9px;padding:1px 6px;margin-left:4px;vertical-align:middle;${btnStyle}"
-              onclick="event.stopPropagation();openCraftModal(${escArg(r.itemDisplay.toLowerCase())},${r.qtyNeeded},${escArg(r.location)})"
-              title="${btnTitle}">🔨</button>`;
-          }
-          return `<td class="quest-td quest-item-link" ${s} title="Click to open item details · ${esc(r.itemInternal)}">${esc(r.itemDisplay)}${craftBtn}</td>`;
+          if (craftStatus === null) return `<td class="quest-td" ${s} style="width:${cw}px;min-width:${cw}px;text-align:center;"></td>`;
+          const btnStyle =
+            craftStatus === 'gold'  ? 'background:#6b4e00;border-color:var(--gold);color:var(--gold);'
+          : craftStatus === 'green' ? 'background:#1a4020;border-color:#5fcaaa;color:#5fcaaa;'
+          : craftStatus === 'blue'  ? 'background:#152840;border-color:#5a8ade;color:#90c0f0;'
+          : craftStatus === 'red'   ? 'background:#4a1010;border-color:#c04040;color:#ff8888;'
+          : 'background:var(--accent);border-color:var(--gold-dim);color:var(--gold);opacity:.65;';
+          const btnTitle =
+            craftStatus === 'gold'  ? 'Ready to craft — skill OK &amp; all ingredients in storage'
+          : craftStatus === 'green' ? 'Skill OK &amp; recipe known — missing some ingredients'
+          : craftStatus === 'blue'  ? 'Skill level OK but recipe not yet learned'
+          : craftStatus === 'red'   ? 'Skill level too low for this recipe'
+          : 'View crafting recipe (load character for skill check)';
+          return `<td class="quest-td" ${s} style="width:${cw}px;min-width:${cw}px;text-align:center;"><button class="btn" style="font-size:9px;padding:1px 6px;${btnStyle}"
+            onclick="event.stopPropagation();openCraftModal(${escArg(r.itemDisplay.toLowerCase())},${r.qtyNeeded},${escArg(r.location)})"
+            title="${btnTitle}">🔨</button></td>`;
         }
+        case 'item':
+          return `<td class="quest-td quest-item-link" ${s} title="Click to open item details · ${esc(r.itemInternal)}"><a href="https://wiki.projectgorgon.com/wiki/${encodeURIComponent(r.itemDisplay.replace(/ /g,'_'))}" target="_blank" style="color:var(--text);text-decoration:none;border-bottom:1px dotted var(--text-dim);" onclick="event.stopPropagation()">${esc(r.itemDisplay)}</a></td>`;
         case 'qty':
           return `<td class="quest-td" ${sr}>${r.qtyNeeded}</td>`;
         case 'indlvl': {
@@ -7871,7 +8625,7 @@ function renderMissingRecipesTab() {
    Bug Report
    ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
-  const ver = 'A1v0';
+  const ver = 'A1v1';
   const ua = navigator.userAgent;
   const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
   const vp = `${window.innerWidth}x${window.innerHeight}`;
