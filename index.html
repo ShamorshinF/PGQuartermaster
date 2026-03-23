@@ -3270,6 +3270,7 @@ function loadCharJSON(jsonText) {
     const data = JSON.parse(jsonText);
     if (!data.Skills && !data.RecipeCompletions) { toast('Invalid character JSON — no Skills or RecipeCompletions found.', true); return; }
     charData = data;
+    woWeeklyBuffEnabled = null;
     _invalidateCharCache();
     IDB.putGameKV('charSheet', data);
     updateCharInfoLine();
