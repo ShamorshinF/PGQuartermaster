@@ -818,13 +818,14 @@ function getIndustryBaseBonus(level) {
   for (const [lvl, bonus] of INDUSTRY_WO_BONUS) { if (level >= lvl) return bonus; }
   return 0;
 }
-let woWeeklyBuffEnabled = true;
+let woWeeklyBuffEnabled = null; // null = auto (follows detection), true/false = user override
 function toggleWeeklyBuff() {
-  woWeeklyBuffEnabled = !woWeeklyBuffEnabled;
   const woBonusMod = charData?.CurrentStats?.WORKORDER_COIN_REWARD_MOD ?? null;
   const industryLevel = charData?.Skills?.Industry?.Level ?? 0;
   const base = getIndustryBaseBonus(industryLevel);
   const detected = woBonusMod != null && Math.abs((woBonusMod - 1) - base - 0.25) < 0.02;
+  const currentEffective = woWeeklyBuffEnabled === null ? detected : woWeeklyBuffEnabled;
+  woWeeklyBuffEnabled = !currentEffective;
   if (!detected && woWeeklyBuffEnabled) {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -4184,12 +4185,13 @@ function renderWorkOrdersTab() {
   const industryLevel = charData?.Skills?.Industry?.Level ?? 0;
   const industryBase = getIndustryBaseBonus(industryLevel);
   const weeklyBuffDetected = woBonusMod != null && Math.abs((woBonusMod - 1) - industryBase - 0.25) < 0.02;
+  const weeklyEffective = woWeeklyBuffEnabled === null ? weeklyBuffDetected : woWeeklyBuffEnabled;
 
   const bonusBtn = document.getElementById('wo-bonus-btn');
   if (bonusBtn) {
     bonusBtn.disabled    = woBonusMod == null;
-    const effectiveMod   = (weeklyBuffDetected && !woWeeklyBuffEnabled) ? (woBonusMod - 0.25)
-                         : (!weeklyBuffDetected && woWeeklyBuffEnabled) ? (woBonusMod + 0.25)
+    const effectiveMod   = (weeklyBuffDetected && !weeklyEffective) ? (woBonusMod - 0.25)
+                         : (!weeklyBuffDetected && weeklyEffective) ? (woBonusMod + 0.25)
                          : woBonusMod;
     const pct            = woBonusMod != null ? Math.round((effectiveMod - 1) * 100) : 0;
     bonusBtn.textContent = woBonusMod != null ? `🎁 WO Bonus (+${pct}%)` : '🎁 WO Bonus (no char data)';
@@ -4202,19 +4204,19 @@ function renderWorkOrdersTab() {
   if (weeklyBtn) {
     if (woApplyBonus && woBonusMod != null) {
       weeklyBtn.style.display = '';
-      if (weeklyBuffDetected && woWeeklyBuffEnabled) {
+      if (weeklyBuffDetected && weeklyEffective) {
         weeklyBtn.textContent     = '⭐ Weekly +25% Active';
         weeklyBtn.style.background  = 'rgba(200,168,75,.25)';
         weeklyBtn.style.borderColor = 'var(--gold)';
         weeklyBtn.style.color       = 'var(--gold)';
         weeklyBtn.title = 'Weekly community WO bonus detected — click to see payouts without it';
-      } else if (!weeklyBuffDetected && woWeeklyBuffEnabled) {
+      } else if (!weeklyBuffDetected && weeklyEffective) {
         weeklyBtn.textContent     = '⭐ Weekly +25% Simulated';
         weeklyBtn.style.background  = 'rgba(200,168,75,.15)';
         weeklyBtn.style.borderColor = '#a08858';
         weeklyBtn.style.color       = '#a08858';
         weeklyBtn.title = 'Weekly bonus is NOT active per your character data — showing simulated payouts with +25%';
-      } else if (weeklyBuffDetected && !woWeeklyBuffEnabled) {
+      } else if (weeklyBuffDetected && !weeklyEffective) {
         weeklyBtn.textContent     = '⭐ Weekly +25% Off';
         weeklyBtn.style.background  = 'rgba(100,100,100,.15)';
         weeklyBtn.style.borderColor = '#666';
@@ -4234,9 +4236,9 @@ function renderWorkOrdersTab() {
 
   let woRewardMult = 1;
   if (woApplyBonus && woBonusMod != null) {
-    if (weeklyBuffDetected && !woWeeklyBuffEnabled) {
+    if (weeklyBuffDetected && !weeklyEffective) {
       woRewardMult = woBonusMod - 0.25;
-    } else if (!weeklyBuffDetected && woWeeklyBuffEnabled) {
+    } else if (!weeklyBuffDetected && weeklyEffective) {
       woRewardMult = woBonusMod + 0.25;
     } else {
       woRewardMult = woBonusMod;
