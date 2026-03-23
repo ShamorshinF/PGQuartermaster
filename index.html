@@ -410,7 +410,7 @@
     <button class="btn" id="wo-bonus-btn" style="font-size:11px;padding:4px 12px;" disabled
             onclick="woApplyBonus=!woApplyBonus; renderWorkOrdersTab()">🎁 WO Bonus</button>
     <button class="btn" id="wo-weekly-buff-btn" style="font-size:11px;padding:4px 12px;display:none;"
-            onclick="woWeeklyBuffEnabled=!woWeeklyBuffEnabled; renderWorkOrdersTab()">⭐ Weekly +25%</button>
+            onclick="toggleWeeklyBuff()">⭐ Weekly +25%</button>
 
   </div>
 
@@ -819,6 +819,24 @@ function getIndustryBaseBonus(level) {
   return 0;
 }
 let woWeeklyBuffEnabled = true;
+function toggleWeeklyBuff() {
+  woWeeklyBuffEnabled = !woWeeklyBuffEnabled;
+  const woBonusMod = charData?.CurrentStats?.WORKORDER_COIN_REWARD_MOD ?? null;
+  const industryLevel = charData?.Skills?.Industry?.Level ?? 0;
+  const base = getIndustryBaseBonus(industryLevel);
+  const detected = woBonusMod != null && Math.abs((woBonusMod - 1) - base - 0.25) < 0.02;
+  if (!detected && woWeeklyBuffEnabled) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `<div style="background:#2a1a1a;border:2px solid #aa3333;border-radius:10px;padding:28px 32px;max-width:420px;text-align:center;font-family:Georgia,serif;">
+      <div style="font-size:24px;color:#ffaaaa;font-weight:bold;margin-bottom:12px;">⚠ Not Currently Active</div>
+      <div style="font-size:14px;color:#ddd;line-height:1.5;margin-bottom:20px;">The weekly +25% WO bonus is <b style="color:#ff6666;">not active</b> according to your character data. Payouts shown will be <b>simulated estimates</b>.</div>
+      <button onclick="this.closest('div[style*=fixed]').remove()" style="cursor:pointer;padding:8px 24px;font-size:14px;font-family:Georgia,serif;background:rgba(170,51,51,.3);border:1px solid #aa3333;border-radius:6px;color:#ffaaaa;">Got it</button>
+    </div>`;
+    document.body.appendChild(overlay);
+  }
+  renderWorkOrdersTab();
+}
 
 /* per-render caches — invalidated when charData or invData changes */
 let _knownRecipesCache = null;  // built from charData.RecipeCompletions
@@ -4170,7 +4188,9 @@ function renderWorkOrdersTab() {
   const bonusBtn = document.getElementById('wo-bonus-btn');
   if (bonusBtn) {
     bonusBtn.disabled    = woBonusMod == null;
-    const effectiveMod   = (weeklyBuffDetected && !woWeeklyBuffEnabled) ? (woBonusMod - 0.25) : woBonusMod;
+    const effectiveMod   = (weeklyBuffDetected && !woWeeklyBuffEnabled) ? (woBonusMod - 0.25)
+                         : (!weeklyBuffDetected && woWeeklyBuffEnabled) ? (woBonusMod + 0.25)
+                         : woBonusMod;
     const pct            = woBonusMod != null ? Math.round((effectiveMod - 1) * 100) : 0;
     bonusBtn.textContent = woBonusMod != null ? `🎁 WO Bonus (+${pct}%)` : '🎁 WO Bonus (no char data)';
     bonusBtn.style.background  = woApplyBonus ? 'var(--green, #3a7d44)' : '#7d2020';
@@ -4180,20 +4200,32 @@ function renderWorkOrdersTab() {
 
   const weeklyBtn = document.getElementById('wo-weekly-buff-btn');
   if (weeklyBtn) {
-    if (weeklyBuffDetected && woApplyBonus) {
+    if (woApplyBonus && woBonusMod != null) {
       weeklyBtn.style.display = '';
-      if (woWeeklyBuffEnabled) {
+      if (weeklyBuffDetected && woWeeklyBuffEnabled) {
         weeklyBtn.textContent     = '⭐ Weekly +25% Active';
         weeklyBtn.style.background  = 'rgba(200,168,75,.25)';
         weeklyBtn.style.borderColor = 'var(--gold)';
         weeklyBtn.style.color       = 'var(--gold)';
         weeklyBtn.title = 'Weekly community WO bonus detected — click to see payouts without it';
-      } else {
+      } else if (!weeklyBuffDetected && woWeeklyBuffEnabled) {
+        weeklyBtn.textContent     = '⭐ Weekly +25% Simulated';
+        weeklyBtn.style.background  = 'rgba(200,168,75,.15)';
+        weeklyBtn.style.borderColor = '#a08858';
+        weeklyBtn.style.color       = '#a08858';
+        weeklyBtn.title = 'Weekly bonus is NOT active per your character data — showing simulated payouts with +25%';
+      } else if (weeklyBuffDetected && !woWeeklyBuffEnabled) {
         weeklyBtn.textContent     = '⭐ Weekly +25% Off';
         weeklyBtn.style.background  = 'rgba(100,100,100,.15)';
         weeklyBtn.style.borderColor = '#666';
         weeklyBtn.style.color       = '#999';
         weeklyBtn.title = 'Weekly bonus excluded from payouts — click to include it';
+      } else {
+        weeklyBtn.textContent     = '⭐ Weekly +25% Inactive';
+        weeklyBtn.style.background  = 'rgba(100,100,100,.15)';
+        weeklyBtn.style.borderColor = '#666';
+        weeklyBtn.style.color       = '#999';
+        weeklyBtn.title = 'Weekly bonus not detected — click to simulate payouts with +25%';
       }
     } else {
       weeklyBtn.style.display = 'none';
@@ -4202,7 +4234,13 @@ function renderWorkOrdersTab() {
 
   let woRewardMult = 1;
   if (woApplyBonus && woBonusMod != null) {
-    woRewardMult = (weeklyBuffDetected && !woWeeklyBuffEnabled) ? (woBonusMod - 0.25) : woBonusMod;
+    if (weeklyBuffDetected && !woWeeklyBuffEnabled) {
+      woRewardMult = woBonusMod - 0.25;
+    } else if (!weeklyBuffDetected && woWeeklyBuffEnabled) {
+      woRewardMult = woBonusMod + 0.25;
+    } else {
+      woRewardMult = woBonusMod;
+    }
   }
   rows.sort((a, b) => {
     if (woPinActive && a.canComplete !== b.canComplete) return a.canComplete ? -1 : 1;
