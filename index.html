@@ -142,11 +142,16 @@
     box-shadow:0 0 12px rgba(200,168,75,.15);}
 
   /* ── bug report button ── */
-  #bug-report-btn{position:fixed;bottom:16px;right:16px;z-index:190;
+  #bug-report-btn{position:fixed;bottom:52px;right:16px;z-index:190;
     font-family:Georgia,serif;font-size:11px;padding:6px 14px;border-radius:5px;
     cursor:pointer;border:1px solid #c04040;background:rgba(30,20,10,.92);color:#e06c75;
     box-shadow:0 2px 8px rgba(0,0,0,.4);transition:all .15s;display:flex;align-items:center;gap:5px;}
   #bug-report-btn:hover{background:rgba(192,64,64,.18);border-color:#e06c75;color:#ff9999;}
+  #support-btn{position:fixed;bottom:16px;right:16px;z-index:190;
+    font-family:Georgia,serif;font-size:11px;padding:6px 14px;border-radius:5px;
+    cursor:pointer;border:1px solid #c8a84b;background:rgba(30,20,10,.92);color:#c8a84b;
+    box-shadow:0 2px 8px rgba(0,0,0,.4);transition:all .15s;display:flex;align-items:center;gap:5px;text-decoration:none;}
+  #support-btn:hover{background:rgba(200,168,75,.18);border-color:#e8c44a;color:#e8c44a;}
 
   ::-webkit-scrollbar{width:6px;height:6px;}
   ::-webkit-scrollbar-track{background:#1a1510;}
@@ -8707,6 +8712,36 @@ window.submitBugReport = submitBugReport;
 </script>
 
 <button id="bug-report-btn" onclick="submitBugReport()" title="Report a bug — generates a debug report and opens GitHub Issues">🐛 Report Bug</button>
+<button id="support-btn" onclick="document.getElementById('support-modal').style.display='flex'" title="Support the developer">💛 Support</button>
+
+<div id="support-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#1e1b14;border:1px solid #4a3d28;border-radius:8px;padding:28px 32px;max-width:460px;width:90%;font-family:Georgia,serif;color:#d4c9a8;box-shadow:0 8px 32px rgba(0,0,0,.6);position:relative;">
+    <button onclick="document.getElementById('support-modal').style.display='none'" style="position:absolute;top:8px;right:12px;background:none;border:none;color:#666;font-size:18px;cursor:pointer;">&times;</button>
+    <div style="text-align:center;margin-bottom:16px;font-size:28px;">💛</div>
+    <h2 style="margin:0 0 12px;color:#c8a84b;font-size:20px;text-align:center;letter-spacing:1px;">Support the Idea Guy</h2>
+    <p style="font-size:13px;line-height:1.7;margin:0 0 12px;color:#b8a888;">
+      Yeah, I used Claude to write the code. I'm not a developer — I'm just a guy who plays PG and got tired of alt-tabbing to spreadsheets. My goal is to make everyone wealthier by making quests and work orders easy to complete. Without AI tools, none of this would have been possible. We are doomed.
+    </p>
+    <p style="font-size:13px;line-height:1.7;margin:0 0 12px;color:#b8a888;">
+      That said, this thing didn't build itself. <strong style="color:#e8c44a;">60+ hours</strong> went into figuring out what the tool should actually do, testing it against real inventories, discovering that vendor skip logic breaks in twelve different ways, and squashing more bugs than are in the Serbule Hills Spider Cave.
+    </p>
+    <p style="font-size:13px;line-height:1.7;margin:0 0 12px;color:#b8a888;">
+      Turns out "just make it plan my route" involves crafting trees, sub-recipes, partial inventory, vendor zones, contract timing, and a hundred other things I didn't know I'd need until they broke. Shoutout to the testers who sent me their exports and helped me find the weird stuff.
+    </p>
+    <p style="font-size:13px;line-height:1.7;margin:0 0 12px;color:#b8a888;">
+      I hope you haven't run into any major bugs — but if you have, please report them, no matter how small, so I can fix them ASAP.
+    </p>
+    <p style="font-size:13px;line-height:1.7;margin:0 0 18px;color:#b8a888;">
+      If this thing has saved you time and you'd like to say thank you:
+    </p>
+    <div style="display:flex;flex-direction:column;gap:10px;align-items:center;">
+      <a href="https://www.paypal.com/paypalme/shamorshin" target="_blank" style="display:inline-block;padding:10px 24px;background:rgba(200,168,75,.15);border:1px solid #c8a84b;border-radius:5px;color:#e8c44a;font-family:Georgia,serif;font-size:14px;text-decoration:none;letter-spacing:.5px;transition:all .15s;cursor:pointer;" onmouseover="this.style.background='rgba(200,168,75,.25)'" onmouseout="this.style.background='rgba(200,168,75,.15)'">🧸 Help me buy my baby a new toy</a>
+      <span style="font-size:12px;color:#666;">— or —</span>
+      <div style="padding:8px 20px;background:rgba(95,202,170,.08);border:1px solid #3a5a4a;border-radius:5px;color:#7ec490;font-size:13px;text-align:center;letter-spacing:.3px;">🐦 Send a pigeon of thanks to <strong style="color:#5fcaaa;">Shamorshin</strong> on Arisetsu</div>
+    </div>
+    <p style="font-size:15px;color:#c8a84b;text-align:center;margin:12px 0 0;font-weight:bold;letter-spacing:.5px;">Either way — thank you for using PG Quartermaster!</p>
+  </div>
+</div>
 
 </body>
 </html>
