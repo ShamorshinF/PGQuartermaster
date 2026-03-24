@@ -2467,7 +2467,7 @@ function buildCraftPlan(recipe, craftsNeeded, globalReserved) {
           Object.assign(reserved, snapshot);
           return null;
         }
-        reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + needed;
+        if (avail > 0) reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + avail;
         hasVendorBuys = true;
         stepIngredients.push({
           name: ing.name, nameLower: ing.nameLower, totalNeeded: needed,
@@ -2505,7 +2505,7 @@ function buildCraftPlan(recipe, craftsNeeded, globalReserved) {
         const iik = gameItemKeyByName[ing.nameLower];
         const ingVendors = iik ? (itemVendorsMap[iik] || []).filter(v => !v.isBarter) : [];
         if (ingVendors.length) {
-          reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + needed;
+          if (avail > 0) reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + avail;
           hasVendorBuys = true;
           stepIngredients.push({
             name: ing.name, nameLower: ing.nameLower, totalNeeded: needed,
@@ -8046,13 +8046,17 @@ function renderQuestRouteHtml(routeData) {
 
     // Vendor buys at this zone
     const zoneBuys = vendorByZone[zone] || [];
-    const seenVendorNl = new Set();
-    const uniqueZoneBuys = zoneBuys.filter(vb => {
-      if (seenVendorNl.has(vb.nl)) return false;
-      if (_routeSkipVendor.has(vb.nl + '|' + zone)) return false;
-      seenVendorNl.add(vb.nl);
-      return true;
-    });
+    // Aggregate quantities for the same item before deduplication
+    const aggMap = {};
+    for (const vb of zoneBuys) {
+      if (_routeSkipVendor.has(vb.nl + '|' + zone)) continue;
+      if (aggMap[vb.nl]) {
+        aggMap[vb.nl].qty += vb.qty;
+      } else {
+        aggMap[vb.nl] = { ...vb };
+      }
+    }
+    const uniqueZoneBuys = Object.values(aggMap);
 
     // Filter deliveries
     const readyDeliveries = data.deliveries.filter(d =>
