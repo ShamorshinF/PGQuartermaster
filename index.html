@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A1v3</title>
+<title>PG Quartermaster A1v4</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -209,7 +209,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v3</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v4</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -220,6 +220,7 @@
     <button class="tab-btn" id="tab-workorders" onclick="stopWoTabFlash();showTab('workorders')">🔧 Work Orders</button>
     <button class="tab-btn"        id="tab-quests"          onclick="showTab('quests')">🗺 Quests</button>
     <button class="tab-btn"        id="tab-missingrecipes"  onclick="showTab('missingrecipes')">📚 Missing Recipes</button>
+    <button class="tab-btn"        id="tab-craftplan"       onclick="showTab('craftplan')">🛠 Craft Plan</button>
     <button class="tab-btn active" id="tab-imports"         onclick="importsBtnClicked=true; updateImportsBtn(); showTab('imports')">📥 Imports</button>
     <div style="position:absolute;left:8px;top:50%;transform:translateY(-50%);text-align:left;font-size:10px;color:var(--text-dim);line-height:1.6;pointer-events:none;">
       <div>Some portions copyright 2026 Elder Game, LLC.</div>
@@ -505,6 +506,9 @@
 <!-- ═══════════════════════════ MISSING RECIPES VIEW ══════════════════ -->
 <div id="view-missingrecipes" style="display:none;"></div>
 
+<!-- ═══════════════════════════ CRAFT PLAN VIEW ═══════════════════════════ -->
+<div id="view-craftplan" style="display:none;"></div>
+
 <!-- ═══════════════════════════ IMPORTS VIEW ═══════════════════════════ -->
 <div id="view-imports" style="display:none;padding:32px 40px;max-width:860px;margin:0 auto;">
   <!-- Welcome Hero -->
@@ -692,7 +696,7 @@
   <div class="modal" id="routeModalInner" style="max-width:780px;width:95%;max-height:85vh;display:flex;flex-direction:column;">
     <div class="modal-hdr" style="flex-shrink:0;">
       <h2>🗺 Route Planner</h2>
-      <button id="route-copy-btn" onclick="_routeModalMode==='quest'?copyQuestRouteToClipboard():copyRouteToClipboard()" title="Copy this route as plain text to paste into your in-game notebook." style="font-family:Georgia,serif;font-size:12px;padding:4px 14px;border-radius:4px;cursor:pointer;border:1px solid var(--gold);background:rgba(200,168,75,.12);color:var(--gold);margin-right:8px;">📋 Copy</button>
+      <button id="route-copy-btn" onclick="(_routeModalMode==='quest'||_routeModalMode==='craftplan')?copyQuestRouteToClipboard():copyRouteToClipboard()" title="Copy this route as plain text to paste into your in-game notebook." style="font-family:Georgia,serif;font-size:12px;padding:4px 14px;border-radius:4px;cursor:pointer;border:1px solid var(--gold);background:rgba(200,168,75,.12);color:var(--gold);margin-right:8px;">📋 Copy</button>
       <button id="route-reset-btn" onclick="routeResetActions()" title="Reset all purchased/skipped/deferred actions and start fresh." style="font-family:Georgia,serif;font-size:12px;padding:4px 14px;border-radius:4px;cursor:pointer;border:1px solid #c04040;background:rgba(192,64,64,.12);color:#ff8888;margin-right:8px;">🔄 Reset</button>
       <button class="modal-close" onclick="document.getElementById('routeModalOverlay').classList.add('hidden')">✕</button>
     </div>
@@ -1270,13 +1274,14 @@ function nomencladHideDebug() {
 function showTab(name) {
   IDB.putKV('pg_active_tab', name);
   if (name !== 'imports') { importsBtnClicked = false; updateImportsBtn(); }
-  ['quests','workorders','missingrecipes','imports','debug'].forEach(t => {
+  ['quests','workorders','missingrecipes','craftplan','imports','debug'].forEach(t => {
     document.getElementById('view-' + t).style.display = name === t ? 'block' : 'none';
     document.getElementById('tab-'  + t).classList.toggle('active', name === t);
   });
   if (name === 'quests')          renderQuestsTab();
   if (name === 'workorders')      { initWoLevelSliders(); renderWorkOrdersTab(); }
   if (name === 'missingrecipes')  renderMissingRecipesTab();
+  if (name === 'craftplan')       renderCraftPlanTab();
   if (name === 'imports')         renderImportsTab();
   if (name === 'debug')           renderDebugTab();
   requestAnimationFrame(updateStickyOffset);
@@ -2462,7 +2467,7 @@ function buildCraftPlan(recipe, craftsNeeded, globalReserved) {
           Object.assign(reserved, snapshot);
           return null;
         }
-        if (avail > 0) reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + avail;
+        reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + needed;
         hasVendorBuys = true;
         stepIngredients.push({
           name: ing.name, nameLower: ing.nameLower, totalNeeded: needed,
@@ -2500,7 +2505,7 @@ function buildCraftPlan(recipe, craftsNeeded, globalReserved) {
         const iik = gameItemKeyByName[ing.nameLower];
         const ingVendors = iik ? (itemVendorsMap[iik] || []).filter(v => !v.isBarter) : [];
         if (ingVendors.length) {
-          if (avail > 0) reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + avail;
+          reserved[ing.nameLower] = (reserved[ing.nameLower] || 0) + needed;
           hasVendorBuys = true;
           stepIngredients.push({
             name: ing.name, nameLower: ing.nameLower, totalNeeded: needed,
@@ -4471,7 +4476,19 @@ function closeRouteModal(evt) {
 
 function reRenderRoute() {
   saveFilterState();
-  if (_routeModalMode === 'quest') {
+  if (_routeModalMode === 'craftplan') {
+    // Re-render craft plan route
+    if (!craftPlanItems.length) return;
+    const rows = craftPlanItems.map(it => ({
+      questId: 'craftplan_' + it.nameLower, questName: it.name, internalName: 'craftplan_' + it.nameLower,
+      location: '—', npcAreaKey: null, npc: '—', description: '', itemInternal: it.nameLower,
+      itemDisplay: it.name, qtyNeeded: it.qty, isActive: true, isWorkOrder: false,
+      indLevel: null, invItem: null, hasAny: false, _isCraftPlan: true,
+    }));
+    const data = buildQuestRouteData(rows);
+    _lastQuestRouteData = data;
+    document.getElementById('routeModalBody').innerHTML = renderQuestRouteHtml(data);
+  } else if (_routeModalMode === 'quest') {
     // Re-render quest route
     const rows = _lastQuestRows;
     if (!rows || !rows.length) return;
@@ -7325,11 +7342,12 @@ function buildQuestRouteData(rows) {
   // ── Main loop ──
   for (const r of rows) {
     const nl = r.itemDisplay.toLowerCase();
-    const npcZone = questResolveZone(r);
-    if (!npcZone) { unavailable.push({ r, reason: 'unknown NPC zone' }); continue; }
+    const isCraftPlan = !!r._isCraftPlan;
+    const npcZone = isCraftPlan ? null : questResolveZone(r);
+    if (!npcZone && !isCraftPlan) { unavailable.push({ r, reason: 'unknown NPC zone' }); continue; }
 
     const qid = r.questId || r.internalName || r.questName;
-    if (questBlocked[qid]) {
+    if (!isCraftPlan && questBlocked[qid]) {
       const others = questBlocked[qid].filter(m => !m.startsWith(r.itemDisplay + ' ('));
       const reason = others.length
         ? `also need: ${others.join(', ')}`
@@ -7338,12 +7356,12 @@ function buildQuestRouteData(rows) {
       continue;
     }
 
-    const delivZone = npcZone;
+    const delivZone = npcZone || '__craftplan__';
     const craftStatus = invData ? getCraftStatus(nl, r.qtyNeeded, globalReserved) : null;
 
     // ── Fully portable ──
     if (portableQtyOf(nl) >= r.qtyNeeded) {
-      ensureStop(delivZone).deliveries.push({ r, readyNote: 'on person / saddlebag ✓', qty: r.qtyNeeded });
+      if (!isCraftPlan) ensureStop(delivZone).deliveries.push({ r, readyNote: 'on person / saddlebag ✓', qty: r.qtyNeeded });
       continue;
     }
 
@@ -7372,8 +7390,33 @@ function buildQuestRouteData(rows) {
     }
     const _craftQty = _hasPartialInv ? (r.qtyNeeded - _existingTotal) : r.qtyNeeded;
 
-    // ── Gold-craft path ──
-    if (craftStatus === 'gold' && !_routeNoCrafting) {
+    // ── Craft plan: offer direct vendor buy before crafting ──
+    if (isCraftPlan && !_routeNoPurchases && !VENDOR_PURCHASE_BLOCKLIST.has(nl)) {
+      const _dpIk = gameItemKeyByName[nl];
+      const _dpVendors = _dpIk ? (itemVendorsMap[_dpIk] || []).filter(v => !v.isBarter) : [];
+      if (_dpVendors.length) {
+        const vendorZones = _dpVendors.map(v => v.zone).filter(z => z && z !== '—');
+        const allSkipped = vendorZones.length > 0 && vendorZones.every(z => _routeSkipVendor.has(nl + '|' + z));
+        if (!allSkipped && !_routeSkipRequired.has(nl)) {
+          // If user clicked "Purchase here", use vendor-only path
+          if (_routeBought.has(nl)) {
+            vendorNeededItems.push({ name: r.itemDisplay, nl, qty: r.qtyNeeded, vendors: _dpVendors, isBought: true });
+            for (const vz of vendorZones) {
+              if (!_routeSkipVendor.has(nl + '|' + vz)) { ensureStop(vz).isGather = true; break; }
+            }
+            continue;
+          }
+          // Otherwise add as an option (will show alongside craft route)
+          vendorNeededItems.push({ name: r.itemDisplay, nl, qty: r.qtyNeeded, vendors: _dpVendors });
+          for (const vz of vendorZones) {
+            if (!_routeSkipVendor.has(nl + '|' + vz)) { ensureStop(vz).isGather = true; break; }
+          }
+        }
+      }
+    }
+
+    // ── Gold-craft path (also handles green for craft plan items via buildCraftPlan's vendor fallback) ──
+    if ((craftStatus === 'gold' || (isCraftPlan && craftStatus === 'green')) && !_routeNoCrafting) {
       const rec = getBestCraftRecipe(nl, _craftQty, globalReserved);
       if (rec) {
         const craftsNeeded = Math.ceil(_craftQty / (rec.resultQty || 1));
@@ -7502,7 +7545,7 @@ function buildQuestRouteData(rows) {
               if (bestZone !== delivZone) allPickupsLocal = false;
             }
           }
-          if (allPickupsLocal) {
+          if (allPickupsLocal && !isCraftPlan) {
             ensureStop(delivZone).localCrafts.push({ r, rec: mainStep.recipe, craftsNeeded: mainStep.craftsNeeded,
               ingredients: mainStep.ingredients, subCrafts: subSteps, hasVendorIngredients: plan.hasVendorBuys });
             ensureStop(delivZone).isGather = true;
@@ -7522,8 +7565,8 @@ function buildQuestRouteData(rows) {
             });
             for (const iz of [...ingredientZones]) { if (!stops[iz]) ingredientZones.delete(iz); }
             craftJobs.push({ r, rec: mainStep.recipe, craftsNeeded: mainStep.craftsNeeded,
-              ingredients: mainStep.ingredients, ingredientZones, delivZone, subCrafts: subSteps, hasVendorIngredients: plan.hasVendorBuys });
-            ensureStop(delivZone).deliveries.push({ r, readyNote: 'after crafting', qty: r.qtyNeeded });
+              ingredients: mainStep.ingredients, ingredientZones, delivZone: isCraftPlan ? null : delivZone, subCrafts: subSteps, hasVendorIngredients: plan.hasVendorBuys });
+            if (!isCraftPlan) ensureStop(delivZone).deliveries.push({ r, readyNote: 'after crafting', qty: r.qtyNeeded });
           }
           for (const step of plan.steps) {
             for (const sing of step.ingredients) {
@@ -7583,6 +7626,15 @@ function buildQuestRouteData(rows) {
             const vendorQty = ii.shortfall || (_routeBoughtDisplay[ing.nameLower] || {}).qty || totalNeeded;
             vendorNeededItems.push({ name: ing.name, nl: ing.nameLower, qty: vendorQty, vendors: ii.vendors,
               isIngredient: true, forCraftItem: nl, forCraftItemName: r.itemDisplay, isBought: _greenBought || false });
+            // For craft plan items, ensure vendor zones exist as stops so vendor buys can render
+            if (isCraftPlan && !_greenBought) {
+              for (const v of ii.vendors) {
+                if (v.zone && v.zone !== '—' && !_routeSkipVendor.has(ing.nameLower + '|' + v.zone)) {
+                  ensureStop(v.zone).isGather = true;
+                  break; // only need first available vendor zone
+                }
+              }
+            }
             if (ii.inStorage > 0) {
               const breakdown = adjBreakdown(ing.nameLower);
               let needed = ii.inStorage;
@@ -7621,7 +7673,7 @@ function buildQuestRouteData(rows) {
             }
           }
         }
-        if (allPickupsLocal) {
+        if (allPickupsLocal && !isCraftPlan) {
           ensureStop(delivZone).localCrafts.push({ r, rec, craftsNeeded, ingredients: jobIngredients, hasVendorIngredients: true });
           ensureStop(delivZone).isGather = true;
         } else {
@@ -7633,8 +7685,8 @@ function buildQuestRouteData(rows) {
             if (jing.vendorZones) jing.vendorZones.forEach(z => { if (z && z !== '—') ingredientZones.add(z); });
           });
           for (const iz of [...ingredientZones]) { if (!stops[iz]) ingredientZones.delete(iz); }
-          craftJobs.push({ r, rec, craftsNeeded, ingredients: jobIngredients, ingredientZones, delivZone, hasVendorIngredients: true });
-          ensureStop(delivZone).deliveries.push({ r, readyNote: 'after crafting', qty: r.qtyNeeded });
+          craftJobs.push({ r, rec, craftsNeeded, ingredients: jobIngredients, ingredientZones, delivZone: isCraftPlan ? null : delivZone, hasVendorIngredients: true });
+          if (!isCraftPlan) ensureStop(delivZone).deliveries.push({ r, readyNote: 'after crafting', qty: r.qtyNeeded });
         }
         for (const ii of _ingInfo) {
           if (!_routeBought.has(ii.ing.nameLower)) {
@@ -7665,7 +7717,7 @@ function buildQuestRouteData(rows) {
           st.isGather = true;
           needed -= take;
         }
-        ensureStop(delivZone).deliveries.push({ r, readyNote: allLocal ? 'picked up here ✓' : 'from storage', qty: r.qtyNeeded });
+        if (!isCraftPlan) ensureStop(delivZone).deliveries.push({ r, readyNote: allLocal ? 'picked up here ✓' : 'from storage', qty: r.qtyNeeded });
         commitReservation(nl, r.qtyNeeded);
         continue;
       }
@@ -7687,7 +7739,7 @@ function buildQuestRouteData(rows) {
             needed -= take;
           }
           vendorNeededItems.push({ name: r.itemDisplay, nl, qty: shortfall, vendors });
-          ensureStop(delivZone).deliveries.push({ r, readyNote: 'storage + vendor', qty: r.qtyNeeded });
+          if (!isCraftPlan) ensureStop(delivZone).deliveries.push({ r, readyNote: 'storage + vendor', qty: r.qtyNeeded });
           commitReservation(nl, totalAll);
           continue;
         }
@@ -7702,7 +7754,12 @@ function buildQuestRouteData(rows) {
         const vendorZones = vendors.map(v => v.zone).filter(z => z && z !== '—');
         const allSkipped = vendorZones.length > 0 && vendorZones.every(z => _routeSkipVendor.has(nl + '|' + z));
         if (!_routeSkipRequired.has(nl) && !allSkipped) {
-          ensureStop(delivZone).deliveries.push({ r, readyNote: 'buy from vendor', qty: r.qtyNeeded });
+          if (!isCraftPlan) ensureStop(delivZone).deliveries.push({ r, readyNote: 'buy from vendor', qty: r.qtyNeeded });
+          if (isCraftPlan) {
+            for (const vz of vendorZones) {
+              if (!_routeSkipVendor.has(nl + '|' + vz)) { ensureStop(vz).isGather = true; break; }
+            }
+          }
           vendorNeededItems.push({ name: r.itemDisplay, nl, qty: r.qtyNeeded, vendors });
           continue;
         } else {
@@ -7714,8 +7771,15 @@ function buildQuestRouteData(rows) {
     unavailable.push({ r, reason: 'not obtainable' });
   }
 
-  // ── Order zones: gather first, then delivery-only, by canonical zone order ──
-  const orderedZones = Object.keys(stops).sort((a, b) => {
+  // ── Order zones: current zone first, then gather, then delivery-only, by canonical order ──
+  const _currentZone = craftPlanCurrentZone || '';
+  const orderedZones = Object.keys(stops).filter(z => z !== '__craftplan__').sort((a, b) => {
+    // Current zone always comes first
+    if (_currentZone) {
+      const aIsCurrent = a === _currentZone || ZONE_PARENT[a] === _currentZone;
+      const bIsCurrent = b === _currentZone || ZONE_PARENT[b] === _currentZone;
+      if (aIsCurrent !== bIsCurrent) return aIsCurrent ? -1 : 1;
+    }
     const aG = stops[a].isGather, bG = stops[b].isGather;
     if (aG !== bG) return aG ? -1 : 1;
     const aParent = ZONE_PARENT[a], bParent = ZONE_PARENT[b];
@@ -8471,6 +8535,291 @@ init().catch(err => {
 
 
 /* ═══════════════════════════════════════════════════════════
+   CRAFT PLAN TAB
+   ═══════════════════════════════════════════════════════════ */
+
+let craftPlanItems = [];          // { name, nameLower, qty }
+let _craftPlanItemsLoaded = false;
+let craftPlanCurrentZone = '';    // player's current zone for route priority
+
+async function _loadCraftPlanItems() {
+  if (_craftPlanItemsLoaded) return;
+  _craftPlanItemsLoaded = true;
+  const saved = await IDB.getKV('craftPlanItems');
+  if (Array.isArray(saved) && saved.length) craftPlanItems = saved;
+}
+
+function _saveCraftPlanItems() {
+  IDB.putKV('craftPlanItems', craftPlanItems);
+}
+
+function craftPlanAdd() {
+  const inp = document.getElementById('craftplan-item-input');
+  if (!inp) return;
+  const raw = inp.value.trim();
+  if (!raw) return;
+  const nl = raw.toLowerCase();
+
+  // Check if item exists in game data
+  const displayName = gameDataCased[nl];
+  if (!displayName) { toast('Item not found in game data.', true); return; }
+
+  // Check if already added
+  if (craftPlanItems.some(it => it.nameLower === nl)) { toast('Already in the list.', true); return; }
+
+  // Check if craftable
+  const recipes = (craftableMap[nl] || []).filter(r => r.resultNameLower === nl);
+  if (!recipes.length) { toast(displayName + ' has no known crafting recipe.', true); return; }
+
+  craftPlanItems.push({ name: displayName, nameLower: nl, qty: 1 });
+  _saveCraftPlanItems();
+  inp.value = '';
+  renderCraftPlanTab();
+}
+
+function craftPlanRemove(idx) {
+  craftPlanItems.splice(idx, 1);
+  _saveCraftPlanItems();
+  renderCraftPlanTab();
+}
+
+function craftPlanUpdateQty(idx, val) {
+  const n = parseInt(val, 10);
+  if (n > 0) craftPlanItems[idx].qty = n;
+  _saveCraftPlanItems();
+  renderCraftPlanTab();
+}
+
+function craftPlanClear() {
+  craftPlanItems = [];
+  _saveCraftPlanItems();
+  renderCraftPlanTab();
+}
+
+function openCraftPlanRouteModal() {
+  if (!craftPlanItems.length) { toast('Add items to your craft plan first.', true); return; }
+
+  // Build fake quest rows from craft plan items
+  const rows = craftPlanItems.map(it => ({
+    questId:       'craftplan_' + it.nameLower,
+    questName:     it.name,
+    internalName:  'craftplan_' + it.nameLower,
+    location:      '—',
+    npcAreaKey:    null,
+    npc:           '—',
+    description:   '',
+    itemInternal:  it.nameLower,
+    itemDisplay:   it.name,
+    qtyNeeded:     it.qty,
+    isActive:      true,
+    isWorkOrder:   false,
+    indLevel:      null,
+    invItem:       null,
+    hasAny:        false,
+    _isCraftPlan:  true,   // flag to suppress deliveries
+  }));
+
+  _routeModalMode = 'craftplan';
+  _questRouteFilter = 'all';
+  const data = buildQuestRouteData(rows);
+  _lastQuestRouteData = data;
+  const html = renderQuestRouteHtml(data);
+
+  const titleEl = document.querySelector('#routeModalInner .modal-hdr h2');
+  if (titleEl) titleEl.textContent = '🛠 Custom Craft Plan';
+  const subtitleWrap = document.querySelector('#routeModalInner .modal-hdr + div');
+  if (subtitleWrap) subtitleWrap.innerHTML = `Planning crafting for <span style="color:var(--text);">${craftPlanItems.length}</span> item${craftPlanItems.length !== 1 ? 's' : ''}.`;
+  document.getElementById('routeModalBody').innerHTML = html;
+  document.getElementById('routeModalOverlay').classList.remove('hidden');
+}
+
+async function renderCraftPlanTab() {
+  await _loadCraftPlanItems();
+  const el = document.getElementById('view-craftplan');
+  if (!el) return;
+
+  const guideSeenKey = 'pg_craftplan_guide_seen';
+  const guideSeen = localStorage.getItem(guideSeenKey);
+  const guideNewClass = guideSeen ? 'guide-opened' : 'guide-new';
+
+  // Build item datalist from craftable items
+  const craftableNames = Object.keys(craftableMap).map(nl => gameDataCased[nl]).filter(Boolean).sort();
+  const datalistOpts = craftableNames.map(n => `<option value="${esc(n)}">`).join('');
+
+  // Build item list rows
+  let tableRows = '';
+  for (let i = 0; i < craftPlanItems.length; i++) {
+    const it = craftPlanItems[i];
+    const cs = getCraftStatus(it.nameLower, it.qty, {});
+    const csStyle =
+        cs === 'gold'  ? 'background:#6b4e00;border-color:var(--gold);color:var(--gold);'
+      : cs === 'green' ? 'background:#1a4020;border-color:#5fcaaa;color:#5fcaaa;'
+      : cs === 'blue'  ? 'background:#152840;border-color:#5a8ade;color:#90c0f0;'
+      : cs === 'red'   ? 'background:#4a1010;border-color:#c04040;color:#ff8888;'
+      : 'background:var(--accent);border-color:var(--gold-dim);color:var(--gold);opacity:.65;';
+    const csLabel = cs === 'gold' ? 'Ready to craft — all ingredients in storage' : cs === 'green' ? 'Craftable with vendor purchases' : cs === 'blue' ? 'Recipe known, missing materials' : cs === 'red' ? 'Missing skill or recipe' : cs === 'nochar' ? 'Load character data' : 'View crafting recipe';
+    const wikiName = encodeURIComponent(it.name.replace(/ /g, '_'));
+
+    // Calculate max possible crafts from current inventory (recursive through sub-recipes)
+    let maxItems = 0;
+    let maxItemsWithVendor = 0;
+    if (invData) {
+      // Returns how many of itemNl you can obtain: from storage + crafting sub-recipes
+      function _maxObtainable(itemNl, depth) {
+        if (depth > 5) return _getInvTotal(itemNl); // prevent infinite recursion
+        const have = _getInvTotal(itemNl);
+        const subRecipes = (craftableMap[itemNl] || []).filter(r => r.resultNameLower === itemNl);
+        if (!subRecipes.length) return have;
+        let bestFromCraft = 0;
+        for (const sr of subRecipes) {
+          if (sr.ingredients.some(si => si.isDynamic)) continue;
+          let srMax = Infinity;
+          for (const si of sr.ingredients) {
+            const siAvail = _maxObtainable(si.nameLower, depth + 1);
+            srMax = Math.min(srMax, Math.floor(siAvail / (si.qty || 1)));
+          }
+          if (srMax !== Infinity) {
+            const produced = srMax * (sr.resultQty || 1);
+            if (produced > bestFromCraft) bestFromCraft = produced;
+          }
+        }
+        return have + bestFromCraft;
+      }
+      // Returns how many with vendor purchases (vendor items = unlimited)
+      function _maxObtainableVendor(itemNl, depth) {
+        if (depth > 5) return _getInvTotal(itemNl);
+        const ik = gameItemKeyByName[itemNl];
+        const hasVendor = ik && !VENDOR_PURCHASE_BLOCKLIST.has(itemNl) && (itemVendorsMap[ik] || []).some(v => !v.isBarter);
+        if (hasVendor) return Infinity;
+        const have = _getInvTotal(itemNl);
+        const subRecipes = (craftableMap[itemNl] || []).filter(r => r.resultNameLower === itemNl);
+        if (!subRecipes.length) return have;
+        let bestFromCraft = 0;
+        for (const sr of subRecipes) {
+          if (sr.ingredients.some(si => si.isDynamic)) continue;
+          let srMax = Infinity;
+          for (const si of sr.ingredients) {
+            const siAvail = _maxObtainableVendor(si.nameLower, depth + 1);
+            if (siAvail === Infinity) continue; // unlimited from vendor
+            srMax = Math.min(srMax, Math.floor(siAvail / (si.qty || 1)));
+          }
+          if (srMax === Infinity) { bestFromCraft = Infinity; break; }
+          if (srMax !== Infinity) {
+            const produced = srMax * (sr.resultQty || 1);
+            if (produced > bestFromCraft) bestFromCraft = produced;
+          }
+        }
+        if (bestFromCraft === Infinity) return Infinity;
+        return have + bestFromCraft;
+      }
+
+      const recipes = (craftableMap[it.nameLower] || []).filter(r => r.resultNameLower === it.nameLower);
+      for (const rec of recipes) {
+        if (rec.ingredients.some(ing => ing.isDynamic)) continue;
+        let recMax = Infinity;
+        let recMaxVendor = Infinity;
+        for (const ing of rec.ingredients) {
+          const avail = _maxObtainable(ing.nameLower, 1);
+          recMax = Math.min(recMax, Math.floor(avail / (ing.qty || 1)));
+          const availV = _maxObtainableVendor(ing.nameLower, 1);
+          if (availV === Infinity) continue;
+          recMaxVendor = Math.min(recMaxVendor, Math.floor(availV / (ing.qty || 1)));
+        }
+        const resultQty = rec.resultQty || 1;
+        if (recMax !== Infinity && recMax * resultQty > maxItems) maxItems = recMax * resultQty;
+        if (recMaxVendor === Infinity) maxItemsWithVendor = Infinity;
+        else if (recMaxVendor * resultQty > maxItemsWithVendor) maxItemsWithVendor = recMaxVendor * resultQty;
+      }
+    }
+    const possibleStr = invData
+      ? `<span style="color:${maxItems >= it.qty ? '#5fcaaa' : maxItems > 0 ? '#e8c44a' : '#e06c75'};">${maxItems}</span>`
+      : '<span style="color:#666;">—</span>';
+    const possibleVendorStr = invData
+      ? maxItemsWithVendor === Infinity
+        ? '<span style="color:#5fcaaa;">∞</span>'
+        : `<span style="color:${maxItemsWithVendor >= it.qty ? '#5fcaaa' : maxItemsWithVendor > 0 ? '#e8c44a' : '#e06c75'};">${maxItemsWithVendor}</span>`
+      : '<span style="color:#666;">—</span>';
+
+    tableRows += `<tr style="border-bottom:1px solid var(--border-dim);">
+      <td style="padding:6px 10px;"><a href="https://wiki.projectgorgon.com/wiki/${wikiName}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;border-bottom:1px dotted var(--border);">${esc(it.name)}</a></td>
+      <td style="padding:6px 10px;text-align:center;"><button class="btn" style="font-size:10px;padding:2px 5px;${csStyle}" onclick="openCraftModal('${it.nameLower}',${it.qty})" title="${csLabel}">🔨</button></td>
+      <td style="padding:6px 10px;text-align:center;" title="Max craftable from current inventory">${possibleStr}</td>
+      <td style="padding:6px 10px;text-align:center;" title="Max craftable with vendor purchases">${possibleVendorStr}</td>
+      <td style="padding:6px 10px;text-align:center;"><input type="number" min="1" value="${it.qty}" style="width:60px;background:var(--bg);color:var(--text);border:1px solid var(--border-dim);border-radius:3px;padding:3px 6px;text-align:center;font-size:12px;" onchange="craftPlanUpdateQty(${i},this.value)"></td>
+      <td style="padding:6px 10px;text-align:center;"><button onclick="craftPlanRemove(${i})" style="cursor:pointer;background:rgba(224,108,117,.1);border:1px solid #e06c75;color:#e06c75;border-radius:3px;padding:2px 8px;font-size:11px;">✗</button></td>
+    </tr>`;
+  }
+
+  el.innerHTML = `
+    <!-- Craft Plan Guide -->
+    <div id="craftplan-guide" style="border-bottom:1px solid var(--border-dim);background:rgba(200,168,75,.04);">
+      <div id="craftplan-guide-header" onclick="const b=document.getElementById('craftplan-guide-body');const a=this.querySelector('.guide-arrow');const h=this;if(b.style.display==='none'){b.style.display='block';a.textContent='▾';h.classList.remove('guide-new');h.classList.add('guide-opened');localStorage.setItem('${guideSeenKey}','1');}else{b.style.display='none';a.textContent='▸';}"
+           class="guide-header ${guideNewClass}"
+           style="display:flex;align-items:center;gap:10px;padding:10px 18px;cursor:pointer;user-select:none;">
+        <span class="guide-arrow" style="font-size:13px;transition:transform .15s;">▸</span>
+        <span style="font-size:14px;font-family:Georgia,serif;letter-spacing:.5px;">How to use Craft Plan</span>
+        <span class="guide-hint" style="font-size:11px;font-style:italic;">(click to expand)</span>
+      </div>
+      <div id="craftplan-guide-body" style="display:none;padding:6px 28px 24px;font-size:13px;color:var(--text-dim);line-height:1.9;">
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;max-width:860px;align-items:baseline;">
+          <strong style="color:var(--text);">Add items</strong> <span>Type an item name in the search box and click Add. Only craftable items can be added.</span>
+          <strong style="color:var(--text);">Set quantity</strong> <span>Adjust how many of each item you want to craft using the number input.</span>
+          <strong style="color:var(--text);">🔨 Craft button</strong> <span>Click to see the full ingredient breakdown, sub-recipes, and vendor sources. Color indicates status: <span style="color:#c8a84b;">gold</span> = all materials in storage, <span style="color:#5fcaaa;">green</span> = craftable with vendor purchases, <span style="color:#6ba4d9;">blue</span> = recipe known but missing materials, <span style="color:#e06c75;">red</span> = missing skill or recipe.</span>
+          <strong style="color:var(--text);">Possible</strong> <span>Shows how many you can craft from your current inventory alone.</span>
+          <strong style="color:var(--text);">+ Vendor</strong> <span>Shows how many you can craft if you also buy vendor-purchasable ingredients. ∞ means all missing ingredients are available from vendors.</span>
+          <strong style="color:var(--text);">📍 Current Zone</strong> <span>Set your current in-game zone. The route planner will prioritize stops in this zone first.</span>
+          <strong style="color:var(--text);">Plan Route</strong> <span>Generates a step-by-step crafting route showing what to pick up, what to buy, and where to craft.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add item row -->
+    <div style="display:flex;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border-dim);">
+      <input class="inp" id="craftplan-item-input" list="craftplan-datalist" placeholder="Type an item name…" style="flex:1;max-width:400px;"
+             onkeydown="if(event.key==='Enter'){craftPlanAdd();}">
+      <datalist id="craftplan-datalist">${datalistOpts}</datalist>
+      <button class="btn" onclick="craftPlanAdd()" style="font-size:12px;padding:6px 16px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.12);">+ Add</button>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+        <label style="font-size:11px;color:var(--text-dim);white-space:nowrap;">📍 Current Zone:</label>
+        <select id="craftplan-zone-select" style="background:var(--bg);color:var(--text);border:1px solid var(--border-dim);border-radius:3px;padding:3px 6px;font-size:12px;"
+                onchange="craftPlanCurrentZone=this.value;">
+          <option value="">— None —</option>
+          ${ROUTE_ZONE_ORDER.map(z => `<option value="${esc(z)}"${craftPlanCurrentZone === z ? ' selected' : ''}>${esc(z)}</option>`).join('')}
+        </select>
+      </span>
+      ${craftPlanItems.length ? `<button class="btn" onclick="craftPlanClear()" style="font-size:11px;padding:4px 12px;border-color:#e06c75;color:#e06c75;background:rgba(224,108,117,.08);">Clear All</button>` : ''}
+    </div>
+
+    <!-- Item list -->
+    ${craftPlanItems.length ? `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="background:rgba(200,168,75,.08);border-bottom:1px solid var(--border);">
+          <th style="padding:8px 10px;text-align:left;font-family:Georgia,serif;color:var(--gold);font-size:12px;">Item</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:60px;">Craft</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:80px;" title="Max craftable from current inventory">Possible</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:80px;" title="Max craftable with vendor purchases">+ Vendor</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:80px;">Qty</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:60px;">Remove</th>
+        </tr>
+      </thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+    ` : `<div style="text-align:center;padding:40px 20px;color:var(--text-dim);font-size:13px;">No items added yet. Type an item name above and click <strong style="color:var(--gold);">+ Add</strong> to start your craft plan.</div>`}
+
+    <!-- Plan Route button -->
+    ${craftPlanItems.length ? `
+    <div style="display:flex;justify-content:center;padding:16px 0;">
+      <button class="btn" style="font-size:22px;font-weight:bold;padding:20px 56px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);border-radius:6px;cursor:pointer;font-family:Georgia,serif;letter-spacing:1px;line-height:1.2;"
+              onclick="openCraftPlanRouteModal()">🛠 Plan Crafting Route
+        <div style="font-size:11px;font-weight:normal;opacity:0.7;margin-top:4px;">Shows pickups, vendor buys &amp; craft steps</div>
+      </button>
+    </div>` : ''}
+  `;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
    MISSING RECIPES TAB
    ═══════════════════════════════════════════════════════════ */
 
@@ -8715,7 +9064,7 @@ function renderMissingRecipesTab() {
    Bug Report
    ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
-  const ver = 'A1v3';
+  const ver = 'A1v4';
   const ua = navigator.userAgent;
   const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
   const vp = `${window.innerWidth}x${window.innerHeight}`;
