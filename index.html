@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A1v4</title>
+<title>PG Quartermaster A1v5</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -209,7 +209,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v4</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v5</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -450,6 +450,13 @@
               style="font-size:13px;font-weight:bold;padding:10px 18px;border-color:var(--gold);color:var(--gold);background:rgba(200,168,75,.15);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
         🔄 Update Character
         <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Reload inventory &amp; skills</div>
+      </button>
+      <button class="btn" id="wo-contract-search-btn"
+              onclick="woSearchContracts()"
+              title="Search your inventory for all work order contract items — shows their storage locations and flags duplicates."
+              style="font-size:13px;font-weight:bold;padding:10px 18px;border-color:#90c0f0;color:#90c0f0;background:rgba(144,192,240,.1);letter-spacing:.3px;white-space:nowrap;line-height:1.2;">
+        📜 Find Contracts
+        <div style="font-size:10px;font-weight:normal;opacity:0.7;margin-top:3px;">Locate contracts &amp; find duplicates</div>
       </button>
     </div>
     <!-- Row 2: industry level slider + filter buttons -->
@@ -822,6 +829,16 @@ function getIndustryBaseBonus(level) {
   for (const [lvl, bonus] of INDUSTRY_WO_BONUS) { if (level >= lvl) return bonus; }
   return 0;
 }
+// Industry level → cumulative Maximum Active Work Orders bonus.
+// Base max active WOs (at Industry 0) is 4; total = 4 + bonus.
+const INDUSTRY_MAX_WO_BASE = 6;
+const INDUSTRY_MAX_WO = [
+  [84,13],[80,12],[72,11],[64,10],[60,9],[48,8],[42,7],[36,6],[30,5],[24,4],[18,3],[12,2],[6,1]
+];
+function getMaxActiveWO(level) {
+  for (const [lvl, bonus] of INDUSTRY_MAX_WO) { if (level >= lvl) return INDUSTRY_MAX_WO_BASE + bonus; }
+  return INDUSTRY_MAX_WO_BASE;
+}
 let woWeeklyBuffEnabled = null; // null = auto (follows detection), true/false = user override
 function toggleWeeklyBuff() {
   const woBonusMod = charData?.CurrentStats?.WORKORDER_COIN_REWARD_MOD ?? null;
@@ -1031,6 +1048,24 @@ function getInvValue(nameLower) {
 
 function getInvBreakdown(nameLower) {
   if (!invData || !invData.Items) return [];
+  // Multi-item alternatives: collect from each alt item in preference order
+  const alts = ITEM_ALTS[nameLower];
+  if (alts) {
+    const result = [];
+    for (const altNl of alts) {
+      const altDisplay = gameDataCased[altNl] || altNl;
+      invData.Items.forEach(it => {
+        if ((it.Name || '').toLowerCase() !== altNl) return;
+        const key = it.StorageVault || '?';
+        const v   = friendlyVault(key);
+        // Merge into existing entry for same vault+alt, or create new
+        const existing = result.find(r => r.vault === v && r.altName === altNl);
+        if (existing) { existing.qty += (it.StackSize || 1); }
+        else result.push({ vault: v, qty: (it.StackSize || 1), vaultKey: key, zone: getZoneForVault(key), isAlt: true, altName: altNl, altDisplay });
+      });
+    }
+    return result.sort((a, b) => b.qty - a.qty);
+  }
   const map = {};
   invData.Items.forEach(it => {
     if ((it.Name || '').toLowerCase() !== nameLower) return;
@@ -2045,6 +2080,28 @@ const INGREDIENT_SUBS = {
   'bottle of water': { sub: 'empty bottle', note: 'Fill with water before use' },
 };
 
+// Items where ANY combination of alternatives fulfils the requirement.
+// key = generic item name (lowercase), value = array of specific item names (lowercase), preferred first.
+const ITEM_ALTS = {
+  'game chip': ['red game chip', 'green game chip', 'yellow game chip'],
+};
+// Resolve vendors for an item, checking alt items if the generic name has no vendors.
+// Returns { vendors, vendorItemName } where vendorItemName is the actual item sold.
+function resolveVendorsForItem(nameLower) {
+  const ik = gameItemKeyByName[nameLower];
+  const vendors = ik ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter) : [];
+  if (vendors.length > 0) return { vendors, vendorItemName: gameDataCased[nameLower] || nameLower };
+  const alts = ITEM_ALTS[nameLower];
+  if (alts) {
+    for (const altNl of alts) {
+      const aik = gameItemKeyByName[altNl];
+      const av = aik ? (itemVendorsMap[aik] || []).filter(v => !v.isBarter) : [];
+      if (av.length > 0) return { vendors: av, vendorItemName: gameDataCased[altNl] || altNl, vendorItemNl: altNl };
+    }
+  }
+  return { vendors: [], vendorItemName: nameLower };
+}
+
 // Items that MUST be crafted at a specific station, which only exists in certain zones.
 // key = result item name (lowercase), value = { station, zones[] }
 const CRAFT_STATION_ZONES = {
@@ -2089,6 +2146,9 @@ function _getInvTotal(nameLower) {
     });
   }
   const base = _invTotalCache[nameLower] || 0;
+  // Multi-item alternatives (e.g. "game chip" → red/green/yellow)
+  const alts = ITEM_ALTS[nameLower];
+  if (alts) return alts.reduce((s, a) => s + (_invTotalCache[a] || 0), 0);
   const subDef = INGREDIENT_SUBS[nameLower];
   if (!subDef) return base;
   return base + (_invTotalCache[subDef.sub] || 0);
@@ -3700,6 +3760,19 @@ function questFindInInv(internalName) {
   if (!invData || !Array.isArray(invData.Items)) return null;
   const display = questItemDisplay(internalName).toLowerCase();
   const internal = internalName.toLowerCase();
+  // Check multi-item alternatives (e.g. "game chip" → red/green/yellow)
+  const alts = ITEM_ALTS[display] || ITEM_ALTS[internal];
+  if (alts) {
+    // Build a synthetic item entry with combined stack size across all alts
+    let totalQty = 0;
+    for (const altNl of alts) {
+      invData.Items.forEach(i => {
+        if ((i.Name || '').toLowerCase() === altNl) totalQty += (i.StackSize || 1);
+      });
+    }
+    if (totalQty > 0) return { Name: questItemDisplay(internalName), StackSize: totalQty, _isAltComposite: true };
+    return null;
+  }
   return invData.Items.find(i => {
     const n = (i.Name || '').toLowerCase();
     return n === display || n === internal;
@@ -4146,8 +4219,8 @@ function renderWorkOrdersTab() {
   const _canBuyFromVendor = r => {
     if (!r.buyAmount || r.buyAmount <= 0) return false;
     if (VENDOR_PURCHASE_BLOCKLIST.has(r.nl)) return false;
-    const ik = gameItemKeyByName[r.nl];
-    return ik && (itemVendorsMap[ik] || []).some(v => !v.isBarter);
+    const resolved = resolveVendorsForItem(r.nl);
+    return resolved.vendors.length > 0;
   };
   const _anyItemInZone = rows.some(r => r.hasItemInZone     && _hasContract(r) && _withinLevel(r));
   const _anyCanBuyAll  = rows.some(r => _canBuyFromVendor(r) && _hasContract(r) && _withinLevel(r));
@@ -4286,7 +4359,7 @@ function renderWorkOrdersTab() {
   stats.innerHTML = `
     🔧 Work Orders — <span>${rows.length}</span> of <span>${totalAll}</span> shown ·
     ${readyCount > 0 ? `<span style="color:var(--gold);font-weight:bold;">⚡ ${readyCount} ready to complete</span> ·` : ''}
-    <span style="color:#e8c44a;">${activeCount}</span> active ·
+    <span style="color:#e8c44a;">${activeCount}${charInd >= 0 ? `/${getMaxActiveWO(charInd)}` : ''}</span> active ·
     <span style="color:#5fcaaa;">${canDo}</span> within Ind. Lvl ·
     <span style="color:#5fcaaa;">${invHit}</span> in inventory
     ${charInd >= 0 ? `<span style="color:var(--gold-dim);font-size:11px;">(your Ind. Lvl: ${charInd} · ${doneCount} completed total)</span>`
@@ -4401,14 +4474,16 @@ function renderWorkOrdersTab() {
             const style    = sameZone ? 'color:#5fcaaa;font-weight:bold;' : 'color:var(--text-dim);';
             const mark     = sameZone ? ' ✓' : '';
             const label    = showZone ? (b.zone || b.vault) : b.vault;
-            return `<span style="${style}">${esc(label)} (${b.qty.toLocaleString()})${mark}</span>`;
+            const altPrefix = b.isAlt ? `${esc(b.altDisplay || b.altName)} · ` : '';
+            return `<span style="${style}">${altPrefix}${esc(label)} (${b.qty.toLocaleString()})${mark}</span>`;
           });
           const tooltip = breakdown.map(b => {
             const bZone    = vaultToZone(b.vaultKey);
             const onPerson = b.vaultKey === '?' || b.vaultKey === 'Saddlebag';
             const sameZone = woZone && (onPerson || bZone === woZone) && ((zoneQtyMap[bZone] || 0) + (onPerson ? b.qty : 0)) >= r.qty;
             const alt      = showZone ? b.vault : (b.zone || b.vault);
-            return `${alt}: ${b.qty.toLocaleString()}${sameZone ? ' ← in zone, enough to complete' : ''}`;
+            const altPrefix = b.isAlt ? `${b.altDisplay || b.altName}: ` : '';
+            return `${altPrefix}${alt}: ${b.qty.toLocaleString()}${sameZone ? ' ← in zone, enough to complete' : ''}`;
           }).join('\n');
           return `<td class="quest-td" ${s} style="width:${cw}px;min-width:${cw}px;font-size:11px;" title="${esc(tooltip)}">${parts.join(', ')}</td>`;
         }
@@ -5466,6 +5541,85 @@ function _showTextPreview(text) {
   document.addEventListener('keydown', _esc, true);
 }
 
+/* ── Find Contracts: search inventory for WO contract papers ── */
+function woSearchContracts() {
+  if (!invData) { showToast('No inventory loaded — import character data first.', 'warn'); return; }
+  if (!invData.Items || !invData.Items.length) { showToast('No inventory items found.', 'warn'); return; }
+
+  // Find all items in inventory whose name starts with "Work Order for "
+  const contractItems = invData.Items.filter(it => (it.Name || '').toLowerCase().startsWith('work order for '));
+
+  // Group by contract name → list of locations
+  const byName = {};
+  for (const it of contractItems) {
+    const name = it.Name;
+    const key = it.StorageVault || '?';
+    const vault = friendlyVault(key);
+    const zone = getZoneForVault(key) || '—';
+    if (!byName[name]) byName[name] = { name, locations: [], totalQty: 0 };
+    // Merge same vault
+    const existing = byName[name].locations.find(l => l.vault === vault);
+    if (existing) { existing.qty += (it.StackSize || 1); }
+    else byName[name].locations.push({ vault, zone, qty: (it.StackSize || 1) });
+    byName[name].totalQty += (it.StackSize || 1);
+  }
+
+  const contracts = Object.values(byName).sort((a, b) => a.name.localeCompare(b.name));
+  const duplicates = contracts.filter(c => c.totalQty > 1 || c.locations.length > 1);
+
+  let html = '';
+  if (!contracts.length) {
+    html = '<div style="padding:20px;text-align:center;color:var(--text-dim);">No work order contracts found in inventory.</div>';
+  } else {
+    html += `<div style="padding:10px 16px;border-bottom:1px solid var(--border-dim);font-size:12px;color:var(--text-dim);">
+      Found <span style="color:var(--text);font-weight:bold;">${contracts.length}</span> unique contract${contracts.length !== 1 ? 's' : ''} (${contractItems.length} total paper${contractItems.length !== 1 ? 's' : ''}).
+      ${duplicates.length > 0 ? `<span style="color:#e8c44a;margin-left:8px;">⚠ ${duplicates.length} duplicate${duplicates.length !== 1 ? 's' : ''} found.</span>` : '<span style="color:#5fcaaa;margin-left:8px;">✓ No duplicates.</span>'}
+    </div>`;
+
+    // Duplicates section
+    if (duplicates.length) {
+      html += `<div style="padding:10px 16px 6px;"><div style="font-size:11px;color:#e8c44a;font-weight:bold;letter-spacing:.3px;margin-bottom:6px;">⚠ DUPLICATES</div>`;
+      for (const c of duplicates) {
+        html += `<div style="padding:6px 8px;margin-bottom:4px;background:rgba(232,196,74,.06);border:1px solid rgba(232,196,74,.2);border-radius:4px;">
+          <div style="font-size:12px;font-weight:bold;color:var(--text);">${esc(c.name)} <span style="color:#e8c44a;font-size:11px;font-weight:normal;">×${c.totalQty}</span></div>
+          <div style="margin-top:3px;">
+            ${c.locations.map(l => `<div style="font-size:11px;color:var(--text-dim);padding:1px 0 1px 12px;">📍 <span style="color:var(--text);">${esc(l.vault)}</span> <span style="color:var(--text-dim);">(${esc(l.zone)})</span> — ×${l.qty}</div>`).join('')}
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+    // All contracts
+    html += `<div style="padding:10px 16px 6px;"><div style="font-size:11px;color:#90c0f0;font-weight:bold;letter-spacing:.3px;margin-bottom:6px;">ALL CONTRACTS</div>`;
+    for (const c of contracts) {
+      const isDupe = c.totalQty > 1 || c.locations.length > 1;
+      const border = isDupe ? 'border:1px solid rgba(232,196,74,.2);background:rgba(232,196,74,.04);' : 'border:1px solid var(--border-dim);';
+      html += `<div style="padding:5px 8px;margin-bottom:3px;border-radius:4px;${border}">
+        <div style="font-size:12px;color:var(--text);">${esc(c.name)} ${c.totalQty > 1 ? `<span style="color:#e8c44a;font-size:11px;">×${c.totalQty}</span>` : ''}</div>
+        <div style="margin-top:2px;">
+          ${c.locations.map(l => `<div style="font-size:11px;color:var(--text-dim);padding:1px 0 1px 12px;">📍 ${esc(l.vault)} <span style="color:var(--text-dim);">(${esc(l.zone)})</span>${l.qty > 1 ? ` — ×${l.qty}` : ''}</div>`).join('')}
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal" style="max-width:650px;width:95%;max-height:85vh;display:flex;flex-direction:column;">
+    <div class="modal-hdr" style="flex-shrink:0;">
+      <h2>📜 Contract Search</h2>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;flex:1;padding:0;">${html}</div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const _esc = e => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _esc, true); } };
+  document.addEventListener('keydown', _esc, true);
+}
+
 function openRouteModal() {
   _routeModalMode = 'wo';
   if (!_lastWoRows.length) {
@@ -5554,8 +5708,21 @@ function buildRouteData(rows) {
   // Handles INGREDIENT_SUBS cross-reservation: if 'bottle of water' uses 'empty bottle'
   // as a substitute, reserving either should reduce the shared pool.
   function adjTotal(nameLower) {
-    const base = _getInvTotal(nameLower); // already includes substitute qty
+    const base = _getInvTotal(nameLower); // already includes substitute/alt qty
     let reserved = globalReserved[nameLower] || 0;
+    // Multi-item alternatives: also count reservations against each alt
+    const alts = ITEM_ALTS[nameLower];
+    if (alts) {
+      for (const a of alts) reserved += (globalReserved[a] || 0);
+      return Math.max(0, base - reserved);
+    }
+    // If this item IS an alt for something, count parent's reservations
+    for (const [parent, altList] of Object.entries(ITEM_ALTS)) {
+      if (altList.includes(nameLower)) {
+        reserved += (globalReserved[parent] || 0);
+        break;
+      }
+    }
     // If this item has a substitute, also count reservations against that substitute
     const subDef = INGREDIENT_SUBS[nameLower];
     if (subDef) reserved += (globalReserved[subDef.sub] || 0);
@@ -5577,6 +5744,9 @@ function buildRouteData(rows) {
   // by globalReserved, preserving per-vault structure for route pickup scheduling.
   function adjBreakdown(nameLower) {
     let remaining = globalReserved[nameLower] || 0;
+    // For alt items, also count reservations against individual alt names
+    const alts = ITEM_ALTS[nameLower];
+    if (alts) for (const a of alts) remaining += (globalReserved[a] || 0);
     if (remaining <= 0) return getInvBreakdown(nameLower);
     return getInvBreakdown(nameLower).map(b => {
       if (remaining <= 0) return b;
@@ -5666,7 +5836,9 @@ function buildRouteData(rows) {
         if (isPortableVault(b)) { needed -= take; continue; }
         const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
         const st = ensureStop(bZone);
-        st.pickups.push({ name: r.name, nameLower: r.nl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
+        const pickupName = b.isAlt ? (b.altDisplay || b.altName) : r.name;
+        const pickupNl   = b.isAlt ? b.altName : r.nl;
+        st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
         st.isGather = true;
         needed -= take;
       }
@@ -6021,7 +6193,9 @@ function buildRouteData(rows) {
           const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
           if (bZone !== delivZone) allLocal = false;
           const st = ensureStop(bZone);
-          st.pickups.push({ name: r.name, nameLower: r.nl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
+          const pickupName = b.isAlt ? (b.altDisplay || b.altName) : r.name;
+          const pickupNl   = b.isAlt ? b.altName : r.nl;
+          st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
           st.isGather = true;
           needed -= take;
         }
@@ -6032,8 +6206,8 @@ function buildRouteData(rows) {
       }
       // Partial storage — some in storage, but not enough. If vendor-purchasable, split.
       if (totalAll > 0 && !_routeNoPurchases && !VENDOR_PURCHASE_BLOCKLIST.has(r.nl)) {
-        const ik = gameItemKeyByName[r.nl];
-        const vendors = ik ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter) : [];
+        const _vr = resolveVendorsForItem(r.nl);
+        const vendors = _vr.vendors;
         if (vendors.length > 0) {
           const shortfall = r.qty - totalAll;
           let needed = totalAll;
@@ -6043,7 +6217,9 @@ function buildRouteData(rows) {
             if (isPortableVault(b)) { needed -= take; continue; }
             const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
             const st = ensureStop(bZone);
-            st.pickups.push({ name: r.name, nameLower: r.nl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
+            const pickupName = b.isAlt ? (b.altDisplay || b.altName) : r.name;
+            const pickupNl   = b.isAlt ? b.altName : r.nl;
+            st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
             st.isGather = true;
             needed -= take;
           }
@@ -6058,8 +6234,8 @@ function buildRouteData(rows) {
 
     // ── Must buy from vendor ─────────────────────────────────────────────────
     {
-      const ik = gameItemKeyByName[r.nl];
-      const vendors = (ik && !VENDOR_PURCHASE_BLOCKLIST.has(r.nl) && !_routeNoPurchases) ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter) : [];
+      const _vr2 = (!VENDOR_PURCHASE_BLOCKLIST.has(r.nl) && !_routeNoPurchases) ? resolveVendorsForItem(r.nl) : { vendors: [] };
+      const vendors = _vr2.vendors;
       const isAbandonedFallback = _routeAbandonedCrafts.has(r.nl);
       if (vendors.length > 0) {
         // Abandoned craft fallback: only allow if vendor exists at current or already-planned stop
@@ -6191,12 +6367,26 @@ function buildRouteData(rows) {
       const isBuyFromVendor   = d.readyNote === 'buy from vendor';
       const isPurchasedByUser = d.readyNote === 'purchased ✓' && _routeBought.has(d.r.nl);
       if (isBuyFromVendor || isPurchasedByUser) {
-        const ik = gameItemKeyByName[d.r.nl];
-        const vendorZones = ik ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter).map(v => v.zone).filter(z => z && z !== '—') : [];
-        // Only a return trip if NO vendor zone is at or before the delivery zone
-        const anyVendorBeforeDeliv = vendorZones.some(vz => (zoneRank[vz] ?? 9999) <= delivRank);
-        if (!anyVendorBeforeDeliv) { d.isReturnTrip = true; continue; }
+        if (isPurchasedByUser) {
+          // User confirmed they will buy at a specific zone — turn-in must come after that zone
+          const boughtZone = (_routeBoughtDisplay[d.r.nl] || {}).zone;
+          // Use the bought zone's rank in ROUTE_ZONE_ORDER (not zoneRank) since the
+          // bought zone's stop may have been removed from the route after purchase
+          const boughtRouteIdx = boughtZone ? ROUTE_ZONE_ORDER.indexOf(boughtZone) : -1;
+          const delivRouteIdx  = ROUTE_ZONE_ORDER.indexOf(zone);
+          if (boughtRouteIdx !== -1 && delivRouteIdx !== -1 && boughtRouteIdx > delivRouteIdx) {
+            d.isReturnTrip = true;
+          }
+          continue;
+        } else {
+          const ik = gameItemKeyByName[d.r.nl];
+          const vendorZones = ik ? (itemVendorsMap[ik] || []).filter(v => !v.isBarter).map(v => v.zone).filter(z => z && z !== '—') : [];
+          // Only a return trip if NO vendor zone is at or before the delivery zone
+          const anyVendorBeforeDeliv = vendorZones.some(vz => (zoneRank[vz] ?? 9999) <= delivRank);
+          if (!anyVendorBeforeDeliv) { d.isReturnTrip = true; continue; }
+        }
       }
+
 
       // (b) contract pickup ordering
       const contractRank = contractPickupRankByItem[d.r.name];
@@ -6325,7 +6515,6 @@ function buildRouteData(rows) {
   });
   // Update zoneRank
   orderedZones.forEach((z, i) => { zoneRank[z] = i; });
-
   // Re-evaluate craft job return-trip status now that zone ranks are final
   for (const job of finalCraftJobs) {
     const lastRank = zoneRank[job.lastIngredientZone] ?? 9999;
@@ -6598,7 +6787,7 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
         const isCrafted = d.readyNote === 'after crafting';
         const noteColor = isReady ? '#5fcaaa' : isCrafted ? gold : 'var(--text-dim)';
         const borderCol = isReady ? '#5fcaaa' : isCrafted ? gold : 'var(--border)';
-        const rewardStr = d.r.rewards ? ` <span style="color:#e8c44a;font-size:11px;">⚡ ${d.r.rewards.toLocaleString()}c</span>` : '';
+        const rewardStr = d.r.rewards ? ` <span style="color:#e8c44a;font-size:11px;">⚡ ${Math.round(d.r.rewards * _rewardMult).toLocaleString()}c</span>` : '';
         // Show Industry level when multiple same-name items exist (different tier WOs)
         const lvlStr = (d.r.level && nameCounts[d.r.nl] > 1) ? ` <span style="color:var(--text-dim);font-size:10px;">Ind ${d.r.level}</span>` : '';
         return `<div style="padding:4px 0 4px 8px;font-size:12px;border-left:2px solid ${borderCol};margin:2px 0;">
@@ -6660,7 +6849,7 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
               if (boughtZone && boughtZone !== cz) return;
               czLines.push(`<div style="padding:3px 0 3px 8px;margin:2px 0;border-left:2px solid #5fcaaa;">
                 <div style="display:flex;align-items:center;gap:6px;">
-                  <div style="flex:1;min-width:0;font-size:12px;">🛒 <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty} — purchased ✓</span></div>
+                  <div style="flex:1;min-width:0;font-size:12px;">🛒 <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty}</span>${vb.vendors && vb.vendors.length ? ` — <span style="color:#c8a84b;">${vb.vendors.slice(0,3).map(v => esc2(v.name)).join(', ')}</span>` : ''} <span style="color:#5fcaaa;font-size:11px;">— purchased ✓</span></div>
                   <div style="flex-shrink:0;"><button style="cursor:pointer;border:1px solid #666;border-radius:3px;padding:2px 7px;font-size:10px;background:rgba(100,100,100,.15);color:#999;" onclick="routeUndoDone(${nl})">↩ Undo</button></div>
                 </div>
               </div>`);
@@ -6791,7 +6980,7 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
           _boughtShownAt.add(vb.nameLower);
           return `<div class="route-action-row" style="${wrapStyle}border-left:2px solid #5fcaaa;">
             <div style="${rowStyle}">
-              <div style="${leftStyle}">🛒 <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty}</span> <span style="color:#5fcaaa;font-size:11px;"> — purchase here ✓</span></div>
+              <div style="${leftStyle}">🛒 <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty}</span>${vb.vendors && vb.vendors.length ? ` — <span style="color:#c8a84b;">${vb.vendors.slice(0,3).map(v => esc2(v.name)).join(', ')}</span>` : ''} <span style="color:#5fcaaa;font-size:11px;">— purchased ✓</span></div>
               <div style="${rightStyle}">
                 <button style="${btnStyle}background:rgba(100,100,100,.15);border-color:#666;color:#999;" onclick="routeUndoDone(${nl})">↩ Undo</button>
               </div>
@@ -8091,7 +8280,7 @@ function renderQuestRouteHtml(routeData) {
           if (boughtZone && boughtZone !== zone) continue;
           lines.push(`<div style="padding:3px 0 3px 8px;margin:2px 0;border-left:2px solid #5fcaaa;">
             <div style="display:flex;align-items:center;gap:6px;">
-              <div style="flex:1;font-size:12px;">🛒 <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty} — purchased ✓</span></div>
+              <div style="flex:1;font-size:12px;">🛒 <span style="color:var(--text);font-weight:bold;">${esc2(vb.name)}</span> <span style="color:#5fcaaa;">×${vb.qty}</span>${vb.vendorNpc ? ` — <span style="color:#c8a84b;">${esc2(vb.vendorNpc)}</span>` : ''} <span style="color:#5fcaaa;font-size:11px;">— purchased ✓</span></div>
               <div style="flex-shrink:0;"><button style="cursor:pointer;border:1px solid #666;border-radius:3px;padding:2px 7px;font-size:10px;background:rgba(100,100,100,.15);color:#999;" onclick="routeUndoDone(${nl})">↩ Undo</button></div>
             </div>
           </div>`);
@@ -9068,7 +9257,7 @@ function renderMissingRecipesTab() {
    Bug Report
    ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
-  const ver = 'A1v4';
+  const ver = 'A1v5';
   const ua = navigator.userAgent;
   const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
   const vp = `${window.innerWidth}x${window.innerHeight}`;
