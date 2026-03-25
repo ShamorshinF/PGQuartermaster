@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A1v6</title>
+<title>PG Quartermaster A1v7</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -209,7 +209,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v6</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v7</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -812,6 +812,10 @@ let recipesData       = null;  // raw from CDN recipes.json
 let sourcesRecipesData= null;  // raw from CDN sources_recipes.json
 let sourcesItemsData  = null;  // raw from CDN sources_items.json
 let npcsData          = null;  // raw from CDN npcs.json
+let skillsData        = null;  // raw from CDN skills.json
+let xpTablesData      = null;  // raw from CDN xptables.json
+let xpTableByName     = {};    // { "TypicalNoncombatSkill" → [cumulative XP per level] }
+let skillXpTableName  = {};    // { "Cooking" → "TypicalNoncombatSkill" }
 let craftableMap      = {};    // { itemDisplayNameLower → [{skill, skillLevel, resultQty, ingredients:[{name,qty}]}] }
 let recipeTrainersMap = {};    // { "recipe_N" → [{ npcKey, name, zone, favorRequired }] }
 let itemVendorsMap    = {};    // { "item_N"   → [{ npcKey, name, zone, favorRequired }] }
@@ -964,6 +968,11 @@ async function init() {
   if (savedSrcItems) { sourcesItemsData = savedSrcItems; }
   const savedNpcs         = await IDB.getGameKV('npcsData', null);
   if (savedNpcs) { npcsData = savedNpcs; }
+  const savedSkills       = await IDB.getGameKV('skillsData', null);
+  if (savedSkills) { skillsData = savedSkills; }
+  const savedXpTables     = await IDB.getGameKV('xpTablesData', null);
+  if (savedXpTables) { xpTablesData = savedXpTables; }
+  if (skillsData && xpTablesData) buildXpTableLookups();
   if (sourcesRecipesData && npcsData) buildRecipeTrainersMap();
   if (sourcesItemsData   && npcsData) buildItemVendorsMap();
 
@@ -1074,7 +1083,8 @@ function getInvBreakdown(nameLower) {
   }
   const map = {};
   invData.Items.forEach(it => {
-    if ((it.Name || '').toLowerCase() !== nameLower) return;
+    const _n = (it.Name || '').toLowerCase();
+    if (_n !== nameLower && !(craftableMap[nameLower] && _n.startsWith(nameLower + ' of '))) return;
     const key = it.StorageVault || '?';
     const v   = friendlyVault(key);
     if (!map[v]) map[v] = { qty: 0, vaultKey: key, zone: getZoneForVault(key) };
@@ -1632,7 +1642,7 @@ function renderInvStorageView() {
     NPC_Gurki:             [0, 10, 15, 20, 25, 30, 35],
     NPC_Ichin:             [0,  0, 16, 24, 28, 36, 44],
     NPC_JaceSoral:         [0,  0, 15, 20, 25, 30, 35],
-    NPC_Joeh:              [10, 16, 22, 28, 34, 40, 46],
+    NPC_Joe:               [10, 16, 22, 28, 34, 40, 46],  // game key is NPC_Joe (Joeh)
     NPC_JuliusPatton:      [0,  0,  0,  0, 28, 32, 36],
     NPC_Jumper:            [0, 16, 24, 32, 40, 48, 56],
     NPC_Kib:               [0, 12, 24, 36, 48, 60, 72],
@@ -1718,9 +1728,9 @@ function renderInvStorageView() {
     byZone[zone].totalValue += info.totalValue;
     if (info.capData) { byZone[zone].totalCapacity += info.capData.slots; byZone[zone].hasCapacity = true; }
   }
-  // Sort zones by total stacks descending; within each zone sort vaults by stacks descending
+  // Sort zones by total stacks descending; within each zone sort vaults by in-game UI order
   const zoneOrder = Object.entries(byZone).sort((a, b) => b[1].totalStacks - a[1].totalStacks);
-  for (const [_, zd] of zoneOrder) zd.vaults.sort((a, b) => b.info.stacks - a.info.stacks);
+  for (const [zoneName, zd] of zoneOrder) zd.vaults.sort((a, b) => vaultOrderInZone(a.vk, b.vk, zoneName));
 
   const totalLocations = Object.keys(vaultCounts).length;
   const totalStacksAll = invData.Items.filter(it => !it._debug).length;
@@ -1880,7 +1890,7 @@ function buildConsolidationRoute() {
     for (const p of m.pickups) {
       if (p.portable) continue;
       ensureStop(p.zone);
-      stops[p.zone].pickups.push({ name: m.name, qty: p.qty, vault: p.vault });
+      stops[p.zone].pickups.push({ name: m.name, qty: p.qty, vault: p.vault, vaultKey: p.vaultKey });
     }
   }
 
@@ -1897,13 +1907,32 @@ function buildConsolidationRoute() {
       if (r > lastPickupRank) { lastPickupRank = r; lastPickupZone = p.zone; }
     }
     ensureStop(m.target.zone);
-    stops[m.target.zone].dropoffs.push({ name: m.name, nameLower: m.nameLower, qty: totalMoving, vault: m.target.vault, portableQty, lastPickupZone });
+    stops[m.target.zone].dropoffs.push({ name: m.name, nameLower: m.nameLower, qty: totalMoving, vault: m.target.vault, vaultKey: m.target.vaultKey, portableQty, lastPickupZone });
   }
 
   // Sort zones in natural travel order
   const orderedZones = Object.keys(stops)
     .filter(z => stops[z].pickups.length || stops[z].dropoffs.length)
     .sort((a, b) => zoneRankFn(a) - zoneRankFn(b));
+
+  // Redistribute Council Vault pickups to earliest accessible zone on route
+  const cvDZ = VAULT_ZONE_OVERRIDES['CouncilVault'] || 'Serbule';
+  if (stops[cvDZ]) {
+    const cvP = stops[cvDZ].pickups.filter(p => (p.vaultKey || '') === 'CouncilVault');
+    if (cvP.length) {
+      const bestZ = orderedZones.find(z => COUNCIL_VAULT_ZONES.includes(z));
+      if (bestZ && bestZ !== cvDZ) {
+        stops[cvDZ].pickups = stops[cvDZ].pickups.filter(p => !cvP.includes(p));
+        ensureStop(bestZ);
+        cvP.forEach(p => stops[bestZ].pickups.push(p));
+        if (!stops[cvDZ].pickups.length && !stops[cvDZ].dropoffs.length) {
+          delete stops[cvDZ];
+          const ci = orderedZones.indexOf(cvDZ);
+          if (ci !== -1) orderedZones.splice(ci, 1);
+        }
+      }
+    }
+  }
 
   // Build a set of which zones have been visited by each stop index,
   // so the renderer knows which dropoffs are ready
@@ -1975,10 +2004,13 @@ function renderConsolidationRoute() {
     // Pickups
     if (pickups.length) {
       const byVault = {};
-      pickups.forEach(p => { if (!byVault[p.vault]) byVault[p.vault] = []; byVault[p.vault].push(p); });
-      for (const [vault, items] of Object.entries(byVault)) {
+      pickups.forEach(p => { const k = p.vaultKey || p.vault; if (!byVault[k]) byVault[k] = []; byVault[k].push(p); });
+      const sortedVaults = Object.keys(byVault).sort((a, b) => vaultOrderInZone(a, b, zone));
+      for (const vk of sortedVaults) {
+        const items = byVault[vk];
+        const vaultName = items[0].vault || friendlyVault(vk);
         html += `<div style="margin-left:16px;margin-bottom:6px;padding:6px 12px;border-left:3px solid #5fcaaa;background:rgba(95,202,170,.06);border-radius:0 4px 4px 0;">
-          <div style="font-size:11px;color:#5fcaaa;font-weight:600;margin-bottom:3px;">📤 Pick up from ${esc(vault)}:</div>`;
+          <div style="font-size:11px;color:#5fcaaa;font-weight:600;margin-bottom:3px;">📤 Pick up from ${esc(vaultName)}:</div>`;
         for (const it of items) {
           html += `<div style="font-size:12px;color:var(--text);padding:1px 0;">${esc(it.name)} <span style="color:var(--gold);font-weight:600;">×${it.qty}</span></div>`;
         }
@@ -1989,10 +2021,13 @@ function renderConsolidationRoute() {
     // Dropoffs
     if (dropoffs.length) {
       const byVault = {};
-      dropoffs.forEach(d => { if (!byVault[d.vault]) byVault[d.vault] = []; byVault[d.vault].push(d); });
-      for (const [vault, items] of Object.entries(byVault)) {
+      dropoffs.forEach(d => { const k = d.vaultKey || d.vault; if (!byVault[k]) byVault[k] = []; byVault[k].push(d); });
+      const sortedVaults = Object.keys(byVault).sort((a, b) => vaultOrderInZone(a, b, zone));
+      for (const vk of sortedVaults) {
+        const items = byVault[vk];
+        const vaultName = items[0].vault || friendlyVault(vk);
         html += `<div style="margin-left:16px;margin-bottom:6px;padding:6px 12px;border-left:3px solid var(--gold);background:rgba(200,168,75,.06);border-radius:0 4px 4px 0;">
-          <div style="font-size:11px;color:var(--gold);font-weight:600;margin-bottom:3px;">📥 Drop off at ${esc(vault)}:</div>`;
+          <div style="font-size:11px;color:var(--gold);font-weight:600;margin-bottom:3px;">📥 Drop off at ${esc(vaultName)}:</div>`;
         for (const it of items) {
           let note = '';
           if (it.portableQty > 0 && it.portableQty >= it.qty) note = ` <span style="color:var(--text-dim);font-size:11px;">(already carrying)</span>`;
@@ -2019,10 +2054,13 @@ function renderConsolidationRoute() {
       html += `<div style="margin-bottom:14px;">
         <div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:6px;">Stop ${stopIdx} — ${esc(zone)} <span style="font-size:11px;color:var(--text-dim);font-weight:400;">(return trip)</span></div>`;
       const byVault = {};
-      returnByZone[zone].forEach(d => { if (!byVault[d.vault]) byVault[d.vault] = []; byVault[d.vault].push(d); });
-      for (const [vault, items] of Object.entries(byVault)) {
+      returnByZone[zone].forEach(d => { const k = d.vaultKey || d.vault; if (!byVault[k]) byVault[k] = []; byVault[k].push(d); });
+      const sortedVaults = Object.keys(byVault).sort((a, b) => vaultOrderInZone(a, b, zone));
+      for (const vk of sortedVaults) {
+        const items = byVault[vk];
+        const vaultName = items[0].vault || friendlyVault(vk);
         html += `<div style="margin-left:16px;margin-bottom:6px;padding:6px 12px;border-left:3px solid var(--gold);background:rgba(200,168,75,.06);border-radius:0 4px 4px 0;">
-          <div style="font-size:11px;color:var(--gold);font-weight:600;margin-bottom:3px;">📥 Drop off at ${esc(vault)}:</div>`;
+          <div style="font-size:11px;color:var(--gold);font-weight:600;margin-bottom:3px;">📥 Drop off at ${esc(vaultName)}:</div>`;
         for (const it of items) {
           let note = '';
           if (it.portableQty > 0 && it.portableQty >= it.qty) note = ` <span style="color:var(--text-dim);font-size:11px;">(already carrying)</span>`;
@@ -2534,6 +2572,7 @@ const NPC_ZONE_OVERRIDES = {
 
 /* Manual zone overrides for vault keys that aren't in npcsData */
 const VAULT_ZONE_OVERRIDES = {
+  'CouncilVault':             'Serbule',  // default; accessible from COUNCIL_VAULT_ZONES
   'RiShinStorageChest':       'Kur Mountains',
   'DreamRealmChest':          'Serbule',
   'IvynsChest':               'Serbule',
@@ -2596,14 +2635,41 @@ window.debugFindNpc = function(search) {
   return hits.map(([k]) => k);
 };
 
+/* Display name overrides for vault keys where the game key doesn't match the in-game name */
+const VAULT_DISPLAY_NAME = {
+  'NPC_Joe': 'Joeh',
+};
+
 /* Convert StorageVault codes to readable names */
 function friendlyVault(v) {
   if (!v || v === '?') return 'On Person';
   if (v === 'Saddlebag') return 'Saddlebag';
+  if (VAULT_DISPLAY_NAME[v]) return VAULT_DISPLAY_NAME[v];
   if (v.startsWith('NPC_'))             return v.slice(4);
   if (v.startsWith('*AccountStorage_')) return 'Transfer Storage (' + v.slice(16) + ')';
   // split CamelCase: SerbuleCommunityChest → Serbule Community Chest
   return v.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
+/* In-game vault display order per zone (add more zones as discovered) */
+const ZONE_VAULT_ORDER = {
+  'Serbule': ['NPC_Joe', 'NPC_Marna', 'IvynsChest', 'NPC_Tadion', 'NPC_CharlesThompson', 'SerbuleCommunityChest', 'DreamRealmChest', 'CouncilVault'],
+};
+
+/* Zones where Council Vault is accessible */
+const COUNCIL_VAULT_ZONES = ['Serbule', 'Eltibule', 'Kur Mountains', 'Rahu', 'Statehelm'];
+
+/* Sort vault keys within a zone to match in-game UI order.
+   Returns a comparator number; unknown vaults sort after known ones, then alphabetically. */
+function vaultOrderInZone(vaultKeyA, vaultKeyB, zone) {
+  const order = ZONE_VAULT_ORDER[zone];
+  if (!order) return (friendlyVault(vaultKeyA)).localeCompare(friendlyVault(vaultKeyB));
+  const idxA = order.indexOf(vaultKeyA);
+  const idxB = order.indexOf(vaultKeyB);
+  const rA = idxA >= 0 ? idxA : 900;
+  const rB = idxB >= 0 ? idxB : 900;
+  if (rA !== rB) return rA - rB;
+  return (friendlyVault(vaultKeyA)).localeCompare(friendlyVault(vaultKeyB));
 }
 
 const QUEST_COLS = [
@@ -3439,6 +3505,58 @@ const CHEESE_FIRKIN_YIELD = {
   'stilton cheese':      [2, 4], 'blue-whisker cheese': [3, 4],
 };
 
+/* Build XP table lookups from CDN skills.json + xptables.json */
+function buildXpTableLookups() {
+  xpTableByName = {};
+  skillXpTableName = {};
+  if (xpTablesData) {
+    for (const [key, table] of Object.entries(xpTablesData)) {
+      if (table.InternalName && Array.isArray(table.XpAmounts)) {
+        xpTableByName[table.InternalName] = table.XpAmounts;
+      }
+    }
+  }
+  if (skillsData) {
+    for (const [key, skill] of Object.entries(skillsData)) {
+      if (skill.XpTable) {
+        // Key format is like "Cooking" or "Blacksmithing"
+        const skillName = skill.Name || key.replace(/^Skill_/, '');
+        skillXpTableName[skillName] = skill.XpTable;
+      }
+    }
+  }
+}
+
+/* Given a skill name, current level, and current XP toward next level,
+   calculate what level and XP progress you'd be at after gaining totalXpGain XP.
+   Returns { newLevel, levelsGained, newXpToward, newXpNeeded, overflow } or null if no table. */
+function calcXpLevelUp(skillName, currentLevel, currentXpToward, totalXpGain) {
+  const tableName = skillXpTableName[skillName];
+  if (!tableName) return null;
+  const table = xpTableByName[tableName];
+  if (!table || !table.length) return null;
+
+  // table[i] = cumulative XP needed to reach level i
+  // Current cumulative XP = table[currentLevel] + currentXpToward (XP already earned toward next)
+  const baseCumXp = (table[currentLevel] || 0) + currentXpToward;
+  const newCumXp = baseCumXp + totalXpGain;
+
+  // Find the new level: highest index where table[i] <= newCumXp
+  let newLevel = currentLevel;
+  for (let i = currentLevel + 1; i < table.length; i++) {
+    if (table[i] <= newCumXp) newLevel = i;
+    else break;
+  }
+  // Cap at max level (last index in table)
+  const maxLevel = table.length - 1;
+  if (newLevel >= maxLevel) newLevel = maxLevel;
+
+  const levelsGained = newLevel - currentLevel;
+  const newXpToward = newCumXp - (table[newLevel] || 0);
+  const newXpNeeded = newLevel < maxLevel ? (table[newLevel + 1] || 0) - (table[newLevel] || 0) : 0;
+  return { newLevel, levelsGained, newXpToward, newXpNeeded };
+}
+
 /* Build craftableMap from recipesData + item lookups. */
 function buildCraftableMap() {
   craftableMap = {};
@@ -3461,6 +3579,12 @@ function buildCraftableMap() {
         recipeInternalName: recipe.InternalName || null,
         skill:              recipe.Skill || recipe.RewardSkill || '?',
         skillLevel: recipe.SkillLevelReq || 0,
+        rewardSkill:          recipe.RewardSkill || recipe.Skill || null,
+        rewardXp:             recipe.RewardSkillXp ?? null,
+        rewardXpFirstTime:    recipe.RewardSkillXpFirstTime ?? null,
+        xpDropOffLevel:       recipe.RewardSkillXpDropOffLevel ?? null,
+        xpDropOffPct:         recipe.RewardSkillXpDropOffPct ?? null,
+        xpDropOffRate:        recipe.RewardSkillXpDropOffRate ?? null,
         resultQty:  result.StackSize || result.Quantity || 1,
         ingredients: ings.map(ing => {
           if (ing.ItemKeys && !ing.ItemCode) {
@@ -3506,19 +3630,23 @@ async function fetchRecipesData() {
     } catch (_) { /* use fallback */ }
 
     const base = `${CDN_BASE}/v${version}/data`;
-    const [recipesRes, sourcesRecipesRes, sourcesItemsRes, npcsRes] = await Promise.all([
+    const [recipesRes, sourcesRecipesRes, sourcesItemsRes, npcsRes, skillsRes, xpTablesRes] = await Promise.all([
       fetch(`${base}/recipes.json`,         { signal: AbortSignal.timeout(30000) }),
       fetch(`${base}/sources_recipes.json`, { signal: AbortSignal.timeout(30000) }),
       fetch(`${base}/sources_items.json`,   { signal: AbortSignal.timeout(30000) }),
       fetch(`${base}/npcs.json`,            { signal: AbortSignal.timeout(30000) }),
+      fetch(`${base}/skills.json`,          { signal: AbortSignal.timeout(30000) }),
+      fetch(`${base}/xptables.json`,        { signal: AbortSignal.timeout(30000) }),
     ]);
     if (!recipesRes.ok)       throw new Error(`recipes.json: HTTP ${recipesRes.status}`);
     if (!sourcesRecipesRes.ok) throw new Error(`sources_recipes.json: HTTP ${sourcesRecipesRes.status}`);
     if (!sourcesItemsRes.ok)  throw new Error(`sources_items.json: HTTP ${sourcesItemsRes.status}`);
     if (!npcsRes.ok)          throw new Error(`npcs.json: HTTP ${npcsRes.status}`);
+    if (!skillsRes.ok)        throw new Error(`skills.json: HTTP ${skillsRes.status}`);
+    if (!xpTablesRes.ok)      throw new Error(`xptables.json: HTTP ${xpTablesRes.status}`);
 
-    const [rawRecipes, rawSrcRecipes, rawSrcItems, rawNpcs] = await Promise.all([
-      recipesRes.json(), sourcesRecipesRes.json(), sourcesItemsRes.json(), npcsRes.json(),
+    const [rawRecipes, rawSrcRecipes, rawSrcItems, rawNpcs, rawSkills, rawXpTables] = await Promise.all([
+      recipesRes.json(), sourcesRecipesRes.json(), sourcesItemsRes.json(), npcsRes.json(), skillsRes.json(), xpTablesRes.json(),
     ]);
 
     const count = Object.keys(rawRecipes).length;
@@ -3528,10 +3656,15 @@ async function fetchRecipesData() {
     sourcesRecipesData = rawSrcRecipes;
     sourcesItemsData   = rawSrcItems;
     npcsData           = rawNpcs;
+    skillsData         = rawSkills;
+    xpTablesData       = rawXpTables;
     IDB.putGameKV('recipesData',        rawRecipes);
     IDB.putGameKV('sourcesRecipesData', rawSrcRecipes);
     IDB.putGameKV('sourcesItemsData',   rawSrcItems);
     IDB.putGameKV('npcsData',           rawNpcs);
+    IDB.putGameKV('skillsData',         rawSkills);
+    IDB.putGameKV('xpTablesData',       rawXpTables);
+    buildXpTableLookups();
     buildCraftableMap();
     buildRecipeTrainersMap();
     buildItemVendorsMap();
@@ -4604,10 +4737,15 @@ function questFindInInv(internalName) {
     if (totalQty > 0) return { Name: questItemDisplay(internalName), StackSize: totalQty, _isAltComposite: true };
     return null;
   }
-  return invData.Items.find(i => {
+  let totalQty = 0;
+  invData.Items.forEach(i => {
     const n = (i.Name || '').toLowerCase();
-    return n === display || n === internal;
-  }) || null;
+    const matchD = n === display || (craftableMap[display] && n.startsWith(display + ' of '));
+    const matchI = n === internal || (craftableMap[internal] && n.startsWith(internal + ' of '));
+    if (matchD || matchI) totalQty += (i.StackSize || 1);
+  });
+  if (totalQty > 0) return { Name: questItemDisplay(internalName) || internalName, StackSize: totalQty };
+  return null;
 }
 
 /* Build the flat row list from questsData */
@@ -4692,6 +4830,7 @@ const WO_ZONE_MAP = {
 
 /* Maps each storagevaults.json key → its Area code */
 const VAULT_AREA_MAP = {
+  'CouncilVault':               'AreaSerbule',  // default zone; accessible from multiple zones via COUNCIL_VAULT_ZONES
   '*AccountStorage_AnimalTown': 'AreaSunVale',
   '*AccountStorage_Casino':     'AreaCasino',
   '*AccountStorage_Home1':      'AreaApartment1',
@@ -4857,16 +4996,19 @@ function buildWorkOrderRows() {
     const isActive    = activeSet.has(e.internalName);
     const isCompleted = completedSet.has(e.internalName);
     const displayName = (e.itemId && gameInternalNames[e.itemId.toLowerCase()]) || e.item;
-    const invItem      = questFindInInv(displayName);
-    const canComplete  = !!(invItem && (invItem.StackSize || 1) >= e.qty);
-    const contractName     = `Work Order for ${displayName} (${e.skill})`;
-    const contractNameAlt  = `Work Order for ${e.item} (${e.skill})`;
-    const contractItem  = invData?.Items?.find(i => {
-      const n = (i.Name || '').toLowerCase();
-      return n === contractName.toLowerCase() || n === contractNameAlt.toLowerCase();
-    }) || null;
+    const invItem       = questFindInInv(displayName);
     const breakdown     = invData ? getInvBreakdown(displayName.toLowerCase()) : [];
     const totalInvQty   = breakdown.reduce((s, b) => s + b.qty, 0);
+    const canComplete   = totalInvQty >= e.qty;
+    const contractName     = `Work Order for ${displayName} (${e.skill})`;
+    const contractNameAlt  = `Work Order for ${e.item} (${e.skill})`;
+    const contractNameBase = `Work Order for ${displayName}`;
+    const contractNameBaseAlt = `Work Order for ${e.item}`;
+    const contractItem  = invData?.Items?.find(i => {
+      const n = (i.Name || '').toLowerCase();
+      return n === contractName.toLowerCase() || n === contractNameAlt.toLowerCase()
+          || n === contractNameBase.toLowerCase() || n === contractNameBaseAlt.toLowerCase();
+    }) || null;
     const buyAmount     = Math.max(0, e.qty - totalInvQty);
     const zoneQty       = e.zone && e.zone !== '—'
       ? breakdown.filter(b => vaultToZone(b.vaultKey) === e.zone || b.vaultKey === '?').reduce((s, b) => s + b.qty, 0)
@@ -6624,7 +6766,7 @@ function buildRouteData(rows) {
       const contractVaultName = friendlyVault(cv);
       const contractNl      = (r.contractItem.Name || '').toLowerCase();
       const st = ensureStop(contractZone);
-      st.pickups.push({ name: r.contractItem.Name, nameLower: contractNl, qty: 1, vault: contractVaultName, forItem: r.name, isIngredient: false, isContract: true });
+      st.pickups.push({ name: r.contractItem.Name, nameLower: contractNl, qty: 1, vault: contractVaultName, vaultKey: cv, forItem: r.name, isIngredient: false, isContract: true });
       st.isGather = true;
     }
 
@@ -6669,7 +6811,7 @@ function buildRouteData(rows) {
         const st = ensureStop(bZone);
         const pickupName = b.isAlt ? (b.altDisplay || b.altName) : r.name;
         const pickupNl   = b.isAlt ? b.altName : r.nl;
-        st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
+        st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: false });
         st.isGather = true;
         needed -= take;
       }
@@ -6712,7 +6854,7 @@ function buildRouteData(rows) {
                 const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
                 if (bZone !== delivZone) allPickupsLocal = false;
                 const st = ensureStop(bZone);
-                st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forItem: r.name, isIngredient: true, pickupNote: stepPickupNote });
+                st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: true, pickupNote: stepPickupNote });
                 st.isGather = true;
                 needed -= take;
               }
@@ -6733,7 +6875,7 @@ function buildRouteData(rows) {
               const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
               if (bZone !== delivZone) allPickupsLocal = false;
               const st = ensureStop(bZone);
-              st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forItem: r.name, isIngredient: true, pickupNote: stepPickupNote });
+              st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: true, pickupNote: stepPickupNote });
               st.isGather = true;
               needed -= take;
             }
@@ -6763,7 +6905,7 @@ function buildRouteData(rows) {
                 const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
                 if (bZone !== delivZone) allPickupsLocal = false;
                 const st = ensureStop(bZone);
-                st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forItem: r.name, isIngredient: true, pickupNote: stepPickupNote });
+                st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: true, pickupNote: stepPickupNote });
                 st.isGather = true;
                 needed -= take;
               }
@@ -6792,7 +6934,7 @@ function buildRouteData(rows) {
             const st = ensureStop(bZone);
             const pickupName = b.isSub ? (gameDataCased[b.subName] || b.subName) : sing.name;
             const pickupNl   = b.isSub ? b.subName : sing.nameLower;
-            st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: true, needsFill: b.isSub ? b.subNote : null, pickupNote: stepPickupNote });
+            st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: true, needsFill: b.isSub ? b.subNote : null, pickupNote: stepPickupNote });
             if (b.isSub) st.hasFillStep = true;
             st.isGather = true;
             needed -= take;
@@ -6949,7 +7091,7 @@ function buildRouteData(rows) {
                 const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
                 if (bZone !== delivZone) allPickupsLocal = false;
                 const st = ensureStop(bZone);
-                st.pickups.push({ name: ing.name, nameLower: ing.nameLower, qty: take, vault: b.vault, forItem: r.name, isIngredient: true });
+                st.pickups.push({ name: ing.name, nameLower: ing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: true });
                 st.isGather = true;
                 needed -= take;
               }
@@ -6970,7 +7112,7 @@ function buildRouteData(rows) {
               const st = ensureStop(bZone);
               const pickupName = b.isSub ? (gameDataCased[b.subName] || b.subName) : ing.name;
               const pickupNl   = b.isSub ? b.subName : ing.nameLower;
-              st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: true, needsFill: b.isSub ? b.subNote : null });
+              st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: true, needsFill: b.isSub ? b.subNote : null });
               if (b.isSub) st.hasFillStep = true;
               st.isGather = true;
               needed -= take;
@@ -7026,7 +7168,7 @@ function buildRouteData(rows) {
           const st = ensureStop(bZone);
           const pickupName = b.isAlt ? (b.altDisplay || b.altName) : r.name;
           const pickupNl   = b.isAlt ? b.altName : r.nl;
-          st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
+          st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: false });
           st.isGather = true;
           needed -= take;
         }
@@ -7050,7 +7192,7 @@ function buildRouteData(rows) {
             const st = ensureStop(bZone);
             const pickupName = b.isAlt ? (b.altDisplay || b.altName) : r.name;
             const pickupNl   = b.isAlt ? b.altName : r.nl;
-            st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forItem: r.name, isIngredient: false });
+            st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forItem: r.name, isIngredient: false });
             st.isGather = true;
             needed -= take;
           }
@@ -7113,6 +7255,28 @@ function buildRouteData(rows) {
     if (bParent && bi < 999) bi += 0.5;
     return ai - bi;
   });
+
+  // ── Redistribute Council Vault pickups to earliest accessible zone on route ──
+  const cvDefaultZone = VAULT_ZONE_OVERRIDES['CouncilVault'] || 'Serbule';
+  if (stops[cvDefaultZone]) {
+    const cvPickups = stops[cvDefaultZone].pickups.filter(p => p.vaultKey === 'CouncilVault');
+    if (cvPickups.length) {
+      // Find earliest route zone that has Council Vault access
+      const bestCvZone = orderedZones.find(z => COUNCIL_VAULT_ZONES.includes(z));
+      if (bestCvZone && bestCvZone !== cvDefaultZone) {
+        stops[cvDefaultZone].pickups = stops[cvDefaultZone].pickups.filter(p => !cvPickups.includes(p));
+        const target = stops[bestCvZone] || ensureStop(bestCvZone);
+        cvPickups.forEach(p => target.pickups.push(p));
+        // Remove empty default zone stop if nothing left
+        const sd = stops[cvDefaultZone];
+        if (!sd.pickups.length && !sd.deliveries.length && !sd.vendorBuys.length && !sd.localCrafts.length) {
+          delete stops[cvDefaultZone];
+          const idx = orderedZones.indexOf(cvDefaultZone);
+          if (idx !== -1) orderedZones.splice(idx, 1);
+        }
+      }
+    }
+  }
 
   // ── Post-process craft jobs: find lastIngredientZone for each, upgrade to localCraft if possible ──
   // Now that we know the route order we can determine where crafting can happen.
@@ -7715,13 +7879,15 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
       });
       const czVaultGroups = {};
       Object.values(czPickupGroups).forEach(g => {
-        const vk = g.vault || cz;
+        const vk = g.vaultKey || g.vault || cz;
         if (!czVaultGroups[vk]) czVaultGroups[vk] = [];
         czVaultGroups[vk].push(g);
       });
       if (Object.keys(czVaultGroups).length) {
         czLines.push(`<div style="font-size:10px;color:#90c0f0;font-weight:bold;margin-bottom:2px;letter-spacing:.3px;">📦 PICK UP FROM STORAGE:</div>`);
-        for (const [vk, items] of Object.entries(czVaultGroups)) {
+        const czSortedVKs = Object.keys(czVaultGroups).sort((a, b) => vaultOrderInZone(a, b, cz));
+        for (const vk of czSortedVKs) {
+          const items = czVaultGroups[vk];
           const itemLines = items.map(g => {
             const borderColor = g.isContract ? '#c8a84b' : g.isIngredient ? '#5a8ade' : '#5fcaaa';
             const icon = g.isContract ? '📜' : '📦';
@@ -7732,7 +7898,7 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
             return `<div style="padding:3px 12px;border-left:2px solid ${borderColor};"><div style="font-size:12px;">${icon} <span style="color:var(--text);font-weight:bold;">${esc2(g.name)}</span> <span style="color:#5fcaaa;"> ×${g.qty}</span>${forStr}</div></div>`;
           }).join('');
           czLines.push(`<div style="margin:3px 0 3px 8px;border:1px solid rgba(144,192,240,.25);border-radius:4px;overflow:hidden;">
-            <div style="padding:3px 8px;background:rgba(144,192,240,.08);font-size:11px;color:#90c0f0;font-weight:bold;">${esc2(vk)}</div>${itemLines}</div>`);
+            <div style="padding:3px 8px;background:rgba(144,192,240,.08);font-size:11px;color:#90c0f0;font-weight:bold;">${esc2(friendlyVault(vk))}</div>${itemLines}</div>`);
         }
       }
 
@@ -7929,17 +8095,19 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
       pickupGroups[k].forItems.add(p.forItem);
       if (p.pickupNote) pickupGroups[k].pickupNotes.add(p.pickupNote);
     });
-    // Pass 2: group aggregated entries by vault
+    // Pass 2: group aggregated entries by vault key
     const vaultGroups = {};
     Object.values(pickupGroups).forEach(g => {
-      const vk = g.vault || zone;
+      const vk = g.vaultKey || g.vault || zone;
       if (!vaultGroups[vk]) vaultGroups[vk] = [];
       vaultGroups[vk].push(g);
     });
-    // Render each vault as a bordered box
+    // Render each vault as a bordered box, sorted by in-game order
     if (Object.keys(vaultGroups).length) {
       lines.push(`<div style="font-size:10px;color:#90c0f0;font-weight:bold;margin-bottom:2px;letter-spacing:.3px;">📦 PICK UP FROM STORAGE:</div>`);
-      for (const [vk, items] of Object.entries(vaultGroups)) {
+      const sortedVKs = Object.keys(vaultGroups).sort((a, b) => vaultOrderInZone(a, b, zone));
+      for (const vk of sortedVKs) {
+        const items = vaultGroups[vk];
         const itemLines = items.map(g => {
           const borderColor = g.isContract ? '#c8a84b' : g.isIngredient ? '#5a8ade' : '#5fcaaa';
           const icon        = g.isContract ? '📜' : '📦';
@@ -7957,7 +8125,7 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
           </div>`;
         }).join('');
         lines.push(`<div style="margin:3px 0 3px 8px;border:1px solid rgba(144,192,240,.25);border-radius:4px;overflow:hidden;">
-          <div style="padding:3px 8px;background:rgba(144,192,240,.08);font-size:11px;color:#90c0f0;font-weight:bold;">${esc2(vk)}</div>
+          <div style="padding:3px 8px;background:rgba(144,192,240,.08);font-size:11px;color:#90c0f0;font-weight:bold;">${esc2(friendlyVault(vk))}</div>
           ${itemLines}
         </div>`);
       }
@@ -8402,7 +8570,7 @@ function buildQuestRouteData(rows) {
         if (isPortableVault(b)) { needed -= take; continue; }
         const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
         const st = ensureStop(bZone);
-        st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: false });
+        st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: false });
         st.isGather = true;
         needed -= take;
       }
@@ -8474,7 +8642,7 @@ function buildQuestRouteData(rows) {
                     const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
                     if (bZone !== delivZone) allPickupsLocal = false;
                     const st = ensureStop(bZone);
-                    st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
+                    st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
                     st.isGather = true;
                     needed -= take;
                   }
@@ -8493,7 +8661,7 @@ function buildQuestRouteData(rows) {
                   const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
                   if (bZone !== delivZone) allPickupsLocal = false;
                   const st = ensureStop(bZone);
-                  st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
+                  st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
                   st.isGather = true;
                   needed -= take;
                 }
@@ -8507,6 +8675,15 @@ function buildQuestRouteData(rows) {
                   vendors: sing.vendors || [], isIngredient: true, forCraftItem: nl, forCraftItemName: r.itemDisplay,
                   isBought: wasBought || false
                 });
+                // For craft plan items, ensure vendor zones exist as stops so vendor buys can render
+                if (isCraftPlan && !wasBought) {
+                  for (const _v of (sing.vendors || [])) {
+                    if (_v.zone && _v.zone !== '—' && !_routeSkipVendor.has(sing.nameLower + '|' + _v.zone)) {
+                      ensureStop(_v.zone).isGather = true;
+                      break;
+                    }
+                  }
+                }
                 if (sing.inStorageQty > 0) {
                   const bd = sing.breakdown || [];
                   let needed = sing.inStorageQty;
@@ -8517,7 +8694,7 @@ function buildQuestRouteData(rows) {
                     const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
                     if (bZone !== delivZone) allPickupsLocal = false;
                     const st = ensureStop(bZone);
-                    st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
+                    st.pickups.push({ name: sing.name, nameLower: sing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: true, pickupNote: stepPickupNote });
                     st.isGather = true;
                     needed -= take;
                   }
@@ -8541,7 +8718,7 @@ function buildQuestRouteData(rows) {
                 const st = ensureStop(bZone);
                 const pickupName = b.isSub ? (gameDataCased[b.subName] || b.subName) : sing.name;
                 const pickupNl   = b.isSub ? b.subName : sing.nameLower;
-                st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, needsFill: b.isSub ? b.subNote : null, pickupNote: stepPickupNote });
+                st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: true, needsFill: b.isSub ? b.subNote : null, pickupNote: stepPickupNote });
                 if (b.isSub) st.hasFillStep = true;
                 st.isGather = true;
                 needed -= take;
@@ -8666,7 +8843,7 @@ function buildQuestRouteData(rows) {
                 const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
                 if (bZone !== delivZone) allPickupsLocal = false;
                 const st = ensureStop(bZone);
-                st.pickups.push({ name: ing.name, nameLower: ing.nameLower, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true });
+                st.pickups.push({ name: ing.name, nameLower: ing.nameLower, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: true });
                 st.isGather = true;
                 needed -= take;
               }
@@ -8687,7 +8864,7 @@ function buildQuestRouteData(rows) {
               const st = ensureStop(bZone);
               const pickupName = b.isSub ? (gameDataCased[b.subName] || b.subName) : ing.name;
               const pickupNl   = b.isSub ? b.subName : ing.nameLower;
-              st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: true, needsFill: b.isSub ? b.subNote : null });
+              st.pickups.push({ name: pickupName, nameLower: pickupNl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: true, needsFill: b.isSub ? b.subNote : null });
               if (b.isSub) st.hasFillStep = true;
               st.isGather = true;
               needed -= take;
@@ -8734,7 +8911,7 @@ function buildQuestRouteData(rows) {
           const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
           if (bZone !== delivZone) allLocal = false;
           const st = ensureStop(bZone);
-          st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: false });
+          st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: false });
           st.isGather = true;
           needed -= take;
         }
@@ -8755,7 +8932,7 @@ function buildQuestRouteData(rows) {
             if (isPortableVault(b)) { needed -= take; continue; }
             const bZone = vaultToZone(b.vaultKey) || b.zone || 'Unknown';
             const st = ensureStop(bZone);
-            st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, forQuest: r.questName, isIngredient: false });
+            st.pickups.push({ name: r.itemDisplay, nameLower: nl, qty: take, vault: b.vault, vaultKey: b.vaultKey, forQuest: r.questName, isIngredient: false });
             st.isGather = true;
             needed -= take;
           }
@@ -8812,6 +8989,26 @@ function buildQuestRouteData(rows) {
     if (bParent && bi < 999) bi += 0.5;
     return ai - bi;
   });
+
+  // ── Redistribute Council Vault pickups to earliest accessible zone on route ──
+  const cvDefaultZone2 = VAULT_ZONE_OVERRIDES['CouncilVault'] || 'Serbule';
+  if (stops[cvDefaultZone2]) {
+    const cvPickups2 = stops[cvDefaultZone2].pickups.filter(p => p.vaultKey === 'CouncilVault');
+    if (cvPickups2.length) {
+      const bestCvZone2 = orderedZones.find(z => COUNCIL_VAULT_ZONES.includes(z));
+      if (bestCvZone2 && bestCvZone2 !== cvDefaultZone2) {
+        stops[cvDefaultZone2].pickups = stops[cvDefaultZone2].pickups.filter(p => !cvPickups2.includes(p));
+        const target2 = stops[bestCvZone2] || ensureStop(bestCvZone2);
+        cvPickups2.forEach(p => target2.pickups.push(p));
+        const sd2 = stops[cvDefaultZone2];
+        if (!sd2.pickups.length && !sd2.deliveries.length && !(sd2.vendorBuys || []).length && !sd2.localCrafts.length) {
+          delete stops[cvDefaultZone2];
+          const idx2 = orderedZones.indexOf(cvDefaultZone2);
+          if (idx2 !== -1) orderedZones.splice(idx2, 1);
+        }
+      }
+    }
+  }
 
   // ── Post-process craft jobs ──
   const zoneRank = {};
@@ -9139,12 +9336,14 @@ function renderQuestRouteHtml(routeData) {
     if (showPickups) {
       const byVault = {};
       for (const p of data.pickups) {
-        const vk = p.vault || '?';
+        const vk = p.vaultKey || p.vault || '?';
         if (!byVault[vk]) byVault[vk] = [];
         byVault[vk].push(p);
       }
       lines.push(`<div style="font-size:10px;color:#90c0f0;font-weight:bold;margin:${showVendors ? '6' : '0'}px 0 2px;letter-spacing:.3px;">📦 PICK UP FROM STORAGE:</div>`);
-      for (const [vk, items] of Object.entries(byVault)) {
+      const sortedVaultKeys = Object.keys(byVault).sort((a, b) => vaultOrderInZone(a, b, zone));
+      for (const vk of sortedVaultKeys) {
+        const items = byVault[vk];
         const itemLines = items.map(p => {
           const borderColor = p.isIngredient ? '#5a8ade' : '#5fcaaa';
           const icon = '📦';
@@ -9756,6 +9955,59 @@ async function renderCraftPlanTab() {
         else if (recMaxVendor * resultQty > maxItemsWithVendor) maxItemsWithVendor = recMaxVendor * resultQty;
       }
     }
+    // Calculate XP for planned quantity
+    let xpSkillStr = '<span style="color:#666;">—</span>';
+    let xpTotalStr = '<span style="color:#666;">—</span>';
+    let xpLevelStr = '<span style="color:#666;">—</span>';
+    const xpRecipes = (craftableMap[it.nameLower] || []).filter(r => r.resultNameLower === it.nameLower && r.rewardXp != null);
+    if (xpRecipes.length) {
+      const xr = xpRecipes[0];
+      const resultQty = xr.resultQty || 1;
+      const craftsNeeded = Math.ceil(it.qty / resultQty);
+      const repeatXp = xr.rewardXp || 0;
+      const known = _getKnownRecipes();
+      const alreadyCrafted = charData ? _isRecipeKnown(xr, known) : false;
+      const firstXp = alreadyCrafted ? repeatXp : (xr.rewardXpFirstTime || repeatXp);
+      const totalXp = craftsNeeded > 0 ? firstXp + Math.max(0, craftsNeeded - 1) * repeatXp : 0;
+      const skillName = xr.rewardSkill || xr.skill || '?';
+      const firstNote = alreadyCrafted ? '(already crafted)' : `(first: ${firstXp})`;
+
+      // Skill column
+      const skillData = charData?.Skills?.[skillName];
+      const skillLvl = skillData ? ` Lv${skillData.Level}` : '';
+      xpSkillStr = `<span style="color:var(--text);" title="${esc(skillName)}${skillLvl}">${esc(skillName)}${skillLvl ? `<span style="color:var(--text-dim);font-size:10px;"> ${skillLvl}</span>` : ''}</span>`;
+
+      // XP column
+      const xpTitle = `${craftsNeeded} craft${craftsNeeded !== 1 ? 's' : ''} · ${repeatXp} XP/craft ${firstNote}`;
+      xpTotalStr = `<span style="color:#90c0f0;" title="${esc(xpTitle)}">${totalXp.toLocaleString()}</span>`;
+
+      // Level column
+      if (skillData && totalXp > 0) {
+        const currentLvl = skillData.Level || 0;
+        const currentXp = skillData.XpTowardNextLevel || 0;
+        const lvlResult = calcXpLevelUp(skillName, currentLvl, currentXp, totalXp);
+        if (lvlResult && lvlResult.levelsGained > 0) {
+          const pctNext = lvlResult.newXpNeeded > 0 ? Math.round(lvlResult.newXpToward / lvlResult.newXpNeeded * 100) : 100;
+          xpLevelStr = `<span style="color:#5fcaaa;" title="${pctNext}% toward Lv${lvlResult.newLevel + 1}">${currentLvl} → ${lvlResult.newLevel}</span>`;
+        } else if (lvlResult) {
+          const pct = lvlResult.newXpNeeded > 0 ? Math.min(100, Math.round(lvlResult.newXpToward / lvlResult.newXpNeeded * 100)) : 0;
+          const remaining = lvlResult.newXpNeeded - lvlResult.newXpToward;
+          xpLevelStr = `<span style="color:var(--text-dim);" title="${remaining.toLocaleString()} XP to Lv${currentLvl + 1}">Lv${currentLvl} (${pct}%)</span>`;
+        } else {
+          const neededXp = skillData.XpNeededForNextLevel || 0;
+          const xpToNextLvl = neededXp - currentXp;
+          if (xpToNextLvl > 0 && totalXp >= xpToNextLvl) {
+            xpLevelStr = `<span style="color:#5fcaaa;">${currentLvl} → ${currentLvl + 1}+</span>`;
+          } else if (neededXp > 0) {
+            const pct = Math.min(100, Math.round((currentXp + totalXp) / neededXp * 100));
+            xpLevelStr = `<span style="color:var(--text-dim);">Lv${currentLvl} (${pct}%)</span>`;
+          }
+        }
+      } else if (!charData) {
+        xpLevelStr = '<span style="color:#666;">—</span>';
+      }
+    }
+
     const possibleStr = invData
       ? `<span style="color:${maxItems >= it.qty ? '#5fcaaa' : maxItems > 0 ? '#e8c44a' : '#e06c75'};">${maxItems}</span>`
       : '<span style="color:#666;">—</span>';
@@ -9770,6 +10022,9 @@ async function renderCraftPlanTab() {
       <td style="padding:6px 10px;text-align:center;"><button class="btn" style="font-size:10px;padding:2px 5px;${csStyle}" onclick="openCraftModal('${it.nameLower}',${it.qty})" title="${csLabel}">🔨</button></td>
       <td style="padding:6px 10px;text-align:center;" title="Max craftable from current inventory">${possibleStr}</td>
       <td style="padding:6px 10px;text-align:center;" title="Max craftable with vendor purchases">${possibleVendorStr}</td>
+      <td style="padding:6px 10px;text-align:center;white-space:nowrap;">${xpSkillStr}</td>
+      <td style="padding:6px 10px;text-align:center;white-space:nowrap;">${xpTotalStr}</td>
+      <td style="padding:6px 10px;text-align:center;white-space:nowrap;">${xpLevelStr}</td>
       <td style="padding:6px 10px;text-align:center;"><input type="number" min="1" value="${it.qty}" style="width:60px;background:var(--bg);color:var(--text);border:1px solid var(--border-dim);border-radius:3px;padding:3px 6px;text-align:center;font-size:12px;" onchange="craftPlanUpdateQty(${i},this.value)"></td>
       <td style="padding:6px 10px;text-align:center;"><button onclick="craftPlanRemove(${i})" style="cursor:pointer;background:rgba(224,108,117,.1);border:1px solid #e06c75;color:#e06c75;border-radius:3px;padding:2px 8px;font-size:11px;">✗</button></td>
     </tr>`;
@@ -9824,6 +10079,9 @@ async function renderCraftPlanTab() {
           <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:60px;">Craft</th>
           <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:80px;" title="Max craftable from current inventory">Possible</th>
           <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:80px;" title="Max craftable with vendor purchases">+ Vendor</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:100px;" title="Crafting skill and current level">Skill</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:90px;" title="Total crafting XP for planned quantity">XP</th>
+          <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:110px;" title="Level progress after crafting">Level</th>
           <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:80px;">Qty</th>
           <th style="padding:8px 10px;text-align:center;font-family:Georgia,serif;color:var(--gold);font-size:12px;width:60px;">Remove</th>
         </tr>
@@ -10089,7 +10347,7 @@ function renderMissingRecipesTab() {
    Bug Report
    ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
-  const ver = 'A1v6';
+  const ver = 'A1v7';
   const ua = navigator.userAgent;
   const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
   const vp = `${window.innerWidth}x${window.innerHeight}`;
