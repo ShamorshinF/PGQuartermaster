@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PG Quartermaster A1v5</title>
+<title>PG Quartermaster A1v6</title>
 <style>
   :root {
     --bg:#1a1510; --panel:#1e1b14; --panel2:#1c1910;
@@ -209,7 +209,7 @@
 
   <!-- ── Banner ── -->
   <div style="background:linear-gradient(135deg,#1a1510 0%,#2a1f0f 50%,#1a1510 100%);border-bottom:2px solid var(--gold);padding:18px 32px;text-align:center;">
-    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v5</span></h1>
+    <h1 style="margin:0;font-family:Georgia,serif;font-size:32px;color:var(--gold);letter-spacing:4px;text-shadow:0 0 18px rgba(200,168,75,0.4);">⚖️ PG Quartermaster <span style="font-size:18px;letter-spacing:2px;opacity:0.8;">A1v6</span></h1>
   </div>
   <div id="char-info-line" style="display:none;text-align:center;padding:3px 0;font-size:11px;color:var(--text);background:#1a1510;"></div>
 
@@ -219,6 +219,7 @@
   <div id="tabBar" class="tab-bar" style="position:sticky;top:0;z-index:30;">
     <button class="tab-btn" id="tab-workorders" onclick="stopWoTabFlash();showTab('workorders')">🔧 Work Orders</button>
     <button class="tab-btn"        id="tab-quests"          onclick="showTab('quests')">🗺 Quests</button>
+    <button class="tab-btn"        id="tab-inventory"       onclick="showTab('inventory')">📦 Inventory</button>
     <button class="tab-btn"        id="tab-missingrecipes"  onclick="showTab('missingrecipes')">📚 Missing Recipes</button>
     <button class="tab-btn"        id="tab-craftplan"       onclick="showTab('craftplan')">🛠 Craft Plan</button>
     <button class="tab-btn active" id="tab-imports"         onclick="importsBtnClicked=true; updateImportsBtn(); showTab('imports')">📥 Imports</button>
@@ -510,6 +511,9 @@
 
 </div><!-- /view-workorders -->
 
+<!-- ═══════════════════════════ INVENTORY VIEW ══════════════════ -->
+<div id="view-inventory" style="display:none;"></div>
+
 <!-- ═══════════════════════════ MISSING RECIPES VIEW ══════════════════ -->
 <div id="view-missingrecipes" style="display:none;"></div>
 
@@ -788,6 +792,7 @@ const CDN_BASE            = 'https://cdn.projectgorgon.com';
 const _TC = {
   quests:   { defs:null, order:null, widths:{}, drag:null, headId:'quests-thead',     bodyId:'quests-tbody'   },
   wo:       { defs:null, order:null, widths:{}, drag:null, headId:'wo-thead',         bodyId:'wo-tbody'       },
+  inv:      { defs:null, order:null, widths:{}, drag:null, headId:'inv-thead',        bodyId:'inv-tbody'      },
 };
 let _tabResizeState = null;  // { tabName, key, startX, startW, thEl }
 
@@ -869,7 +874,7 @@ let _invTotalCache     = null;  // { nameLower → totalQty } across all vaults
 /* ── init ── */
 async function init() {
   // If user has already seen guides, skip the flashing animation
-  ['wo', 'quests', 'mr'].forEach(k => {
+  ['wo', 'quests', 'mr', 'inventory'].forEach(k => {
     if (localStorage.getItem(`pg_${k}_guide_seen`) === '1') {
       const gh = document.getElementById(`${k}-guide-header`);
       if (gh) { gh.classList.remove('guide-new'); gh.classList.add('guide-opened'); }
@@ -900,6 +905,7 @@ async function init() {
   // Per-tab column state
   _TC.quests.defs   = QUEST_COLS;
   _TC.wo.defs       = WO_COLS;
+  _TC.inv.defs      = INV_COLS;
   for (const [tabName, tc] of Object.entries(_TC)) {
     const savedOrder  = kv[`${tabName}.colOrder`];
     const savedWidths = kv[`${tabName}.colWidths`];
@@ -966,7 +972,7 @@ async function init() {
   const allLoaded = !!(invData && invData.Items && charData && questsData && gameData);
   if (allLoaded) {
     const savedTab = kv['pg_active_tab'] || 'workorders';
-    const validTabs = ['quests','workorders','missingrecipes','imports'];
+    const validTabs = ['quests','workorders','inventory','missingrecipes','craftplan','imports'];
     showTab(validTabs.includes(savedTab) ? savedTab : 'workorders');
   } else {
     importsBtnClicked = true; updateImportsBtn(); showTab('imports');
@@ -1309,12 +1315,13 @@ function nomencladHideDebug() {
 function showTab(name) {
   IDB.putKV('pg_active_tab', name);
   if (name !== 'imports') { importsBtnClicked = false; updateImportsBtn(); }
-  ['quests','workorders','missingrecipes','craftplan','imports','debug'].forEach(t => {
+  ['quests','workorders','inventory','missingrecipes','craftplan','imports','debug'].forEach(t => {
     document.getElementById('view-' + t).style.display = name === t ? 'block' : 'none';
     document.getElementById('tab-'  + t).classList.toggle('active', name === t);
   });
   if (name === 'quests')          renderQuestsTab();
   if (name === 'workorders')      { initWoLevelSliders(); renderWorkOrdersTab(); }
+  if (name === 'inventory')       renderInventoryTab();
   if (name === 'missingrecipes')  renderMissingRecipesTab();
   if (name === 'craftplan')       renderCraftPlanTab();
   if (name === 'imports')         renderImportsTab();
@@ -1327,6 +1334,795 @@ function showTab(name) {
    ═══════════════════════════════════════════════════════════ */
 
 let invData         = null;   // parsed JSON object from the game report
+
+/* ── Inventory tab helpers ── */
+function invSetView(v) { invTabView = v; saveFilterState(); renderInventoryTab(); }
+function invSetSort(key) {
+  if (invSortKey === key) invSortDir *= -1;
+  else { invSortKey = key; invSortDir = 1; }
+  saveFilterState(); renderInventoryTab();
+}
+function invSetGiftSort(key) {
+  if (invGiftSortKey === key) invGiftSortDir *= -1;
+  else { invGiftSortKey = key; invGiftSortDir = 1; }
+  saveFilterState(); renderInventoryTab();
+}
+function invSetDupSort(key) {
+  if (invDupSortKey === key) invDupSortDir *= -1;
+  else { invDupSortKey = key; invDupSortDir = 1; }
+  saveFilterState(); renderInventoryTab();
+}
+
+function buildInvRows() {
+  if (!invData || !invData.Items) return [];
+  return invData.Items.filter(it => !it._debug).map(it => {
+    const nl = (it.Name || '').toLowerCase();
+    const vaultKey = it.StorageVault || '?';
+    const vault = friendlyVault(vaultKey);
+    const zone = getZoneForVault(vaultKey) || (isPortableVault(vaultKey) ? 'On Person' : '—');
+    const val = it.Value ?? (gameData ? gameData[nl] : null) ?? null;
+    const qty = it.StackSize || 1;
+    return { name: gameDataCased[nl] || it.Name || nl, nameLower: nl, qty, location: vault, vaultKey, zone, value: val, totalValue: val != null ? val * qty : null };
+  });
+}
+
+function buildDuplicateItems() {
+  if (!invData || !invData.Items) return [];
+  const byName = {};
+  invData.Items.filter(it => !it._debug).forEach(it => {
+    const nl = (it.Name || '').toLowerCase();
+    if (!byName[nl]) byName[nl] = [];
+    byName[nl].push({ vault: friendlyVault(it.StorageVault || '?'), vaultKey: it.StorageVault || '?', zone: getZoneForVault(it.StorageVault || '?') || '—', qty: it.StackSize || 1 });
+  });
+  return Object.entries(byName)
+    .filter(([_, entries]) => new Set(entries.map(e => e.vaultKey)).size >= 2)
+    .map(([nl, entries]) => ({
+      name: gameDataCased[nl] || nl, nameLower: nl,
+      totalQty: entries.reduce((s, e) => s + e.qty, 0),
+      locations: entries,
+      locationCount: new Set(entries.map(e => e.vaultKey)).size,
+    }))
+    .sort((a, b) => b.locationCount - a.locationCount || a.name.localeCompare(b.name));
+}
+
+function buildGiftMatches() {
+  if (!npcsData || !invData) return [];
+  const invByName = {};
+  invData.Items.filter(it => !it._debug).forEach(it => {
+    const nl = (it.Name || '').toLowerCase();
+    if (!invByName[nl]) invByName[nl] = [];
+    invByName[nl].push({ vault: friendlyVault(it.StorageVault || '?'), qty: it.StackSize || 1 });
+  });
+  const results = [];
+  for (const [npcKey, npc] of Object.entries(npcsData)) {
+    const prefs = npc.Preferences || [];
+    if (!prefs.length) continue;
+    const favor = playerFavorLevel(npcKey);
+    if (favor === 'SoulMates') continue;
+    const zone = npc.AreaFriendlyName || '—';
+    const name = npc.Name || npcKey.replace('NPC_', '');
+    for (const pref of prefs) {
+      const itemNl = (pref.Name || '').toLowerCase();
+      if (!invByName[itemNl]) continue;
+      const totalQty = invByName[itemNl].reduce((s, e) => s + e.qty, 0);
+      results.push({ npc: name, npcKey, zone, favor, item: gameDataCased[itemNl] || pref.Name, itemNl, desire: pref.Desire || 'Like', qty: totalQty, locations: invByName[itemNl] });
+    }
+  }
+  return results.sort((a, b) => {
+    if (a.desire !== b.desire) return a.desire === 'Love' ? -1 : 1;
+    return a.npc.localeCompare(b.npc);
+  });
+}
+
+function renderInventoryTab() {
+  const el = document.getElementById('view-inventory');
+  if (!el) return;
+
+  const guideSeenKey = 'pg_inventory_guide_seen';
+  const guideSeen = localStorage.getItem(guideSeenKey);
+  const guideNewClass = guideSeen ? 'guide-opened' : 'guide-new';
+
+  // Collect unique vaults for the filter dropdown
+  const vaultSet = new Set();
+  if (invData && invData.Items) invData.Items.forEach(it => vaultSet.add(it.StorageVault || '?'));
+  const vaultOpts = [...vaultSet].map(vk => `<option value="${esc(vk)}" ${invVaultFilter === vk ? 'selected' : ''}>${esc(friendlyVault(vk))}</option>`).join('');
+
+  let html = '';
+
+  // ── How to use guide ──
+  html += `<div style="border-bottom:1px solid var(--border-dim);background:rgba(200,168,75,.04);">
+    <div id="inventory-guide-header" onclick="const b=document.getElementById('inventory-guide-body');const a=this.querySelector('.guide-arrow');const h=this;if(b.style.display==='none'){b.style.display='block';a.textContent='▾';h.classList.remove('guide-new');h.classList.add('guide-opened');localStorage.setItem('pg_inventory_guide_seen','1');}else{b.style.display='none';a.textContent='▸';}"
+         class="guide-header ${guideNewClass}"
+         style="display:flex;align-items:center;gap:10px;padding:10px 18px;cursor:pointer;user-select:none;">
+      <span class="guide-arrow" style="font-size:13px;transition:transform .15s;">▸</span>
+      <span style="font-size:14px;font-weight:bold;">How to Use: Inventory Manager</span>
+      <span class="guide-hint" style="font-size:11px;margin-left:auto;">(click to expand)</span>
+    </div>
+    <div id="inventory-guide-body" style="display:none;padding:12px 22px 16px;font-size:12px;line-height:1.7;color:var(--text-dim);">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;">
+        <div><strong style="color:var(--gold);">All Items</strong> — Browse every item across all your storage. Search by name, filter by vault, sort by any column. Item names link to the wiki.</div>
+        <div><strong style="color:var(--gold);">Storage Overview</strong> — See how many item stacks are in each storage container at a glance, with visual progress bars.</div>
+        <div><strong style="color:var(--gold);">Duplicates</strong> — Find items stored in multiple locations so you can consolidate stacks and free up precious inventory space.</div>
+        <div><strong style="color:var(--gold);">Favor Gifts</strong> — Discover which items in your inventory are loved or liked by NPCs, so you can raise favor efficiently.</div>
+      </div>
+    </div>
+  </div>`;
+
+  // ── Sub-view buttons + search bar ──
+  html += `<div style="padding:10px 18px;border-bottom:1px solid var(--border-dim);display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
+    <button class="quest-filter-btn ${invTabView === 'items'      ? 'active' : ''}" onclick="invSetView('items')">📦 All Items</button>
+    <button class="quest-filter-btn ${invTabView === 'storage'    ? 'active' : ''}" onclick="invSetView('storage')">🗄 Storage Overview</button>
+    <button class="quest-filter-btn ${invTabView === 'duplicates' ? 'active' : ''}" onclick="invSetView('duplicates')">🔍 Duplicates</button>
+    <button class="quest-filter-btn ${invTabView === 'gifts'      ? 'active' : ''}" onclick="invSetView('gifts')">🎁 Favor Gifts</button>`;
+
+  if (invTabView === 'items') {
+    html += `<div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <select onchange="invVaultFilter=this.value;saveFilterState();renderInventoryTab();" style="background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;">
+        <option value="">All Storage</option>${vaultOpts}
+      </select>
+      <input type="text" placeholder="Search items…" value="${esc(invSearch)}" oninput="invSearch=this.value;renderInventoryTab();"
+        style="background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px 10px;font-size:12px;width:180px;">
+    </div>`;
+  }
+  if (invTabView === 'gifts') {
+    html += `<div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <input type="text" placeholder="Search NPC or item…" value="${esc(invSearch)}" oninput="invSearch=this.value;renderInventoryTab();"
+        style="background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px 10px;font-size:12px;width:180px;">
+    </div>`;
+  }
+  if (invTabView === 'duplicates') {
+    html += `<div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <input type="text" placeholder="Search items…" value="${esc(invSearch)}" oninput="invSearch=this.value;renderInventoryTab();"
+        style="background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px 10px;font-size:12px;width:180px;">
+    </div>`;
+  }
+  html += `</div>`;
+
+  if (!invData || !invData.Items || !invData.Items.length) {
+    html += `<div style="text-align:center;padding:60px 20px;color:var(--text-dim);font-size:14px;">
+      <div style="font-size:28px;margin-bottom:12px;">📦</div>
+      <div>No inventory data loaded.</div>
+      <div style="margin-top:6px;font-size:12px;">Import your inventory JSON from the <strong style="color:var(--gold);cursor:pointer;" onclick="showTab('imports')">Imports</strong> tab.</div>
+    </div>`;
+    el.innerHTML = html;
+    return;
+  }
+
+  // ── Render the active sub-view ──
+  if (invTabView === 'items')      html += renderInvItemsView();
+  if (invTabView === 'storage')    html += renderInvStorageView();
+  if (invTabView === 'duplicates') html += renderInvDuplicatesView();
+  if (invTabView === 'gifts')      html += renderInvGiftsView();
+
+  // Preserve search input focus and cursor across re-render
+  const prevFocus = document.activeElement;
+  const hadFocus = prevFocus && prevFocus.tagName === 'INPUT' && el.contains(prevFocus);
+  const selStart = hadFocus ? prevFocus.selectionStart : null;
+  const selEnd   = hadFocus ? prevFocus.selectionEnd : null;
+
+  el.innerHTML = html;
+
+  if (hadFocus) {
+    const newInput = el.querySelector('input[type="text"]');
+    if (newInput) {
+      newInput.focus();
+      if (selStart !== null) { newInput.selectionStart = selStart; newInput.selectionEnd = selEnd; }
+    }
+  }
+}
+
+/* ── All Items sub-view ── */
+function renderInvItemsView() {
+  let rows = buildInvRows();
+
+  // Filter by vault
+  if (invVaultFilter) rows = rows.filter(r => r.vaultKey === invVaultFilter);
+
+  // Filter by search
+  if (invSearch.trim()) {
+    const terms = invSearch.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
+    rows = rows.filter(r => terms.some(t => r.nameLower.includes(t) || r.location.toLowerCase().includes(t) || r.zone.toLowerCase().includes(t)));
+  }
+
+  // Sort
+  rows.sort((a, b) => {
+    let cmp = 0;
+    switch (invSortKey) {
+      case 'name':     cmp = a.name.localeCompare(b.name); break;
+      case 'qty':      cmp = a.qty - b.qty; break;
+      case 'location': cmp = a.location.localeCompare(b.location); break;
+      case 'zone':     cmp = a.zone.localeCompare(b.zone); break;
+      case 'value':    cmp = (a.value ?? -1) - (b.value ?? -1); break;
+      case 'total':    cmp = (a.totalValue ?? -1) - (b.totalValue ?? -1); break;
+    }
+    return cmp * invSortDir;
+  });
+
+  // Stats
+  const uniqueItems = new Set(rows.map(r => r.nameLower)).size;
+  const totalValue = rows.reduce((s, r) => s + (r.totalValue || 0), 0);
+  const uniqueVaults = new Set(rows.map(r => r.vaultKey)).size;
+
+  let html = `<div style="padding:6px 18px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border-dim);">
+    Showing <strong style="color:var(--text);">${rows.length}</strong> stacks · <strong style="color:var(--text);">${uniqueItems}</strong> unique items · <strong style="color:var(--text);">${uniqueVaults}</strong> storage locations · Total value: <strong style="color:var(--gold);">${totalValue.toLocaleString()}c</strong>
+  </div>`;
+
+  // Table
+  html += `<div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr id="inv-thead">`;
+  // Render header via _TC system
+  const order = _TC.inv.order || INV_COLS.map(c => c.key);
+  for (const key of order) {
+    const col = INV_COLS.find(c => c.key === key);
+    if (!col) continue;
+    const w = tabColW('inv', key);
+    const isSorted = invSortKey === key;
+    const arrow = isSorted ? (invSortDir === 1 ? ' ▲' : ' ▼') : '';
+    const cursor = col.sortable ? 'cursor:pointer;' : '';
+    const onclick = col.sortable ? `onclick="invSetSort('${key}')"` : '';
+    html += `<th style="padding:8px 6px;text-align:left;color:var(--gold);font-size:11px;font-weight:600;border-bottom:1px solid var(--border);width:${w}px;${cursor}user-select:none;white-space:nowrap;" ${onclick}>${esc(col.label)}${arrow}</th>`;
+  }
+  html += `</tr></thead><tbody id="inv-tbody">`;
+
+  for (const r of rows) {
+    html += `<tr style="border-bottom:1px solid var(--border-dim);" onmouseenter="this.style.background='var(--row-hover)'" onmouseleave="this.style.background=''">`;
+    for (const key of order) {
+      switch (key) {
+        case 'name': {
+          const wikiName = encodeURIComponent(r.name.replace(/ /g, '_'));
+          html += `<td style="padding:6px;"><a href="https://wiki.projectgorgon.com/wiki/${wikiName}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;" onmouseenter="this.style.color='var(--gold)'" onmouseleave="this.style.color='var(--text)'">${esc(r.name)}</a></td>`;
+          break;
+        }
+        case 'qty':
+          html += `<td style="padding:6px;text-align:right;">${r.qty.toLocaleString()}</td>`;
+          break;
+        case 'location':
+          html += `<td style="padding:6px;color:var(--text-dim);font-size:12px;">${esc(r.location)}</td>`;
+          break;
+        case 'zone':
+          html += `<td style="padding:6px;color:var(--text-dim);font-size:12px;">${esc(r.zone)}</td>`;
+          break;
+        case 'value':
+          html += `<td style="padding:6px;text-align:right;color:var(--gold);font-size:12px;">${r.value != null ? r.value.toLocaleString() + 'c' : '—'}</td>`;
+          break;
+        case 'total':
+          html += `<td style="padding:6px;text-align:right;color:var(--gold);font-weight:bold;font-size:12px;">${r.totalValue != null ? r.totalValue.toLocaleString() + 'c' : '—'}</td>`;
+          break;
+      }
+    }
+    html += `</tr>`;
+  }
+  if (!rows.length) html += `<tr><td colspan="${order.length}" style="padding:20px;text-align:center;color:var(--text-dim);">No items match your search.</td></tr>`;
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+/* ── Storage Overview sub-view ── */
+function renderInvStorageView() {
+  if (!invData || !invData.Items) return '';
+  // Count stacks per vault
+  const vaultCounts = {};
+  invData.Items.filter(it => !it._debug).forEach(it => {
+    const vk = it.StorageVault || '?';
+    if (!vaultCounts[vk]) vaultCounts[vk] = { stacks: 0, items: 0, totalValue: 0 };
+    vaultCounts[vk].stacks++;
+    vaultCounts[vk].items += (it.StackSize || 1);
+    const nl = (it.Name || '').toLowerCase();
+    const val = it.Value ?? (gameData ? gameData[nl] : null) ?? 0;
+    vaultCounts[vk].totalValue += val * (it.StackSize || 1);
+  });
+
+  // NPC storage slot counts per favor tier (from wiki.projectgorgon.com/wiki/Storage)
+  // Keys match NPC_ prefix vault keys. Values: [Neutral, Comfortable, Friends, CloseFriends, BestFriends, LikeFamily, SoulMates]
+  const NPC_STORAGE_SLOTS = {
+    NPC_Agrashab:          [0, 16, 20, 24, 28, 32, 36],
+    NPC_Ashk:              [0,  8, 16, 24, 32, 40, 48],
+    NPC_BaronessMarithFelgard: [0, 5, 10, 20, 30, 40, 50],
+    NPC_Bendith:           [0, 10, 20, 30, 40, 50, 60],
+    NPC_CharlesThompson:   [0,  0, 32, 40, 48, 56, 64],
+    NPC_CaptainGregory:    [0,  0, 10, 20, 30, 40, 50],
+    NPC_CynthiaRolfe:      [0, 10, 20, 30, 40, 50, 60],
+    NPC_DanielMurderdark:  [0,  0, 12, 20, 28, 36, 44],
+    NPC_DentonRazor:       [0,  0, 10, 20, 30, 40, 50],
+    NPC_Crall:             [0,  0, 10, 20, 30, 40, 50],
+    NPC_ElectraBreakdawn:  [0, 10, 20, 30, 40, 50, 60],
+    NPC_FerrisBlueheart:   [0,  0,  0, 30, 40, 50, 60],
+    NPC_GossamyrTheGreat:  [0,  0, 20, 35, 50, 50, 50],
+    NPC_Gurki:             [0, 10, 15, 20, 25, 30, 35],
+    NPC_Ichin:             [0,  0, 16, 24, 28, 36, 44],
+    NPC_JaceSoral:         [0,  0, 15, 20, 25, 30, 35],
+    NPC_Joeh:              [10, 16, 22, 28, 34, 40, 46],
+    NPC_JuliusPatton:      [0,  0,  0,  0, 28, 32, 36],
+    NPC_Jumper:            [0, 16, 24, 32, 40, 48, 56],
+    NPC_Kib:               [0, 12, 24, 36, 48, 60, 72],
+    NPC_Korbok:            [0,  0,  0,  0,  0, 50, 65],
+    NPC_Lamashu:           [0, 10, 15, 20, 25, 30, 35],
+    NPC_LauraNeth:         [0,  0, 20, 30, 40, 50, 60],
+    NPC_Lawara:            [0,  0,  0,  0, 18, 20, 24],
+    NPC_Mandibles:         [0, 10, 20, 30, 40, 50, 60],
+    NPC_Marna:             [12, 16, 24, 32, 40, 48, 56],
+    NPC_Melandria:         [0,  0, 20, 25, 30, 35, 40],
+    NPC_Midge:             [0,  8, 16, 24, 32, 40, 48],
+    NPC_Mope:              [0,  0, 15, 30, 40, 50, 60],
+    NPC_Nishika:           [0, 10, 20, 30, 40, 50, 60],
+    NPC_Noita:             [0, 10, 20, 30, 40, 50, 60],
+    NPC_Norbert:           [0, 16, 24, 32, 40, 48, 56],
+    NPC_Otis:              [0,  8, 16, 24, 32, 40, 48],
+    NPC_Ragabir:           [0, 10, 20, 30, 40, 50, 60],
+    NPC_Raina:             [0,  8, 16, 24, 32, 40, 48],
+    NPC_Raul:              [0, 16, 24, 32, 40, 48, 56],
+    NPC_Red:               [0,  5, 10, 15, 20, 25, 30],
+    NPC_SammieGrimspine:   [0,  0, 10, 20, 30, 40, 50],
+    NPC_Selaxi:            [0, 10, 20, 30, 40, 50, 60],
+    NPC_SieAntry:          [0,  0, 24, 32, 40, 48, 56],
+    NPC_Silvia:            [0,  0, 20, 24, 28, 32, 36],
+    NPC_SirArif:           [0,  8,  8,  8,  8,  8,  8],
+    NPC_Sona:              [0, 10, 20, 30, 40, 50, 60],
+    NPC_Tadion:            [0,  0,  0,  0,  0, 36, 42],
+    NPC_Tavilak:           [12, 18, 24, 30, 36, 42, 48],
+    NPC_Torgan:            [0,  0, 16, 24, 32, 40, 50],
+    NPC_TylerGreen:        [0,  0,  0,  0, 28, 32, 36],
+    NPC_Ukorga:            [0, 16, 24, 32, 40, 46, 56],
+    NPC_WillemFangblade:   [0, 12, 24, 36, 48, 60, 72],
+  };
+  const FAVOR_TIER_IDX = { Neutral:0, Comfortable:1, Friends:2, CloseFriends:3, BestFriends:4, LikeFamily:5, SoulMates:6 };
+
+  // Returns { slots, max, favor } or null
+  // slots = current capacity based on player favor, max = SoulMates capacity, favor = player's level
+  function getVaultCapacity(vk) {
+    if (!vk || vk === '?' || vk === 'Saddlebag') return null;
+    if (vk.startsWith('*AccountStorage_')) return null;
+    const npcKey = vk.startsWith('NPC_') ? vk : `NPC_${vk}`;
+
+    // Try wiki-sourced lookup with player's actual favor level
+    const slots = NPC_STORAGE_SLOTS[npcKey];
+    if (slots) {
+      const favorLevel = playerFavorLevel(npcKey);
+      const max = slots[6];
+      if (favorLevel) {
+        const idx = FAVOR_TIER_IDX[favorLevel];
+        if (idx !== undefined) return { slots: slots[idx] || 0, max, favor: favorLevel };
+      }
+      return { slots: max, max, favor: null };
+    }
+
+    // Fallback: use CDN SpaceIncreases count (16 base + 8 per tier)
+    const npc = npcsData?.[npcKey];
+    if (!npc || !npc.Services) return null;
+    const svc = npc.Services.find(s => s.Type === 'Storage');
+    if (!svc) return null;
+    const tiers = Array.isArray(svc.SpaceIncreases) ? svc.SpaceIncreases.length : 0;
+    const max = 16 + tiers * 8;
+    const favorLevel = playerFavorLevel(npcKey);
+    if (favorLevel && svc.SpaceIncreases) {
+      const allTiers = [svc.Favor, ...svc.SpaceIncreases];
+      let unlockedTiers = 0;
+      for (const tier of allTiers) {
+        if ((FAVOR_RANK[favorLevel] ?? -1) >= (FAVOR_RANK[tier] ?? 99)) unlockedTiers++;
+      }
+      return { slots: 16 + (unlockedTiers - 1) * 8, max, favor: favorLevel };
+    }
+    return { slots: max, max, favor: null };
+  }
+
+  // Group vaults by zone
+  const byZone = {};
+  for (const [vk, info] of Object.entries(vaultCounts)) {
+    info.capData = getVaultCapacity(vk); // { slots, max, favor } or null
+    const zone = getZoneForVault(vk) || (isPortableVault(vk) ? 'On Person' : 'Unknown');
+    if (!byZone[zone]) byZone[zone] = { vaults: [], totalStacks: 0, totalItems: 0, totalValue: 0, totalCapacity: 0, hasCapacity: false };
+    byZone[zone].vaults.push({ vk, info });
+    byZone[zone].totalStacks += info.stacks;
+    byZone[zone].totalItems += info.items;
+    byZone[zone].totalValue += info.totalValue;
+    if (info.capData) { byZone[zone].totalCapacity += info.capData.slots; byZone[zone].hasCapacity = true; }
+  }
+  // Sort zones by total stacks descending; within each zone sort vaults by stacks descending
+  const zoneOrder = Object.entries(byZone).sort((a, b) => b[1].totalStacks - a[1].totalStacks);
+  for (const [_, zd] of zoneOrder) zd.vaults.sort((a, b) => b.info.stacks - a.info.stacks);
+
+  const totalLocations = Object.keys(vaultCounts).length;
+  const totalStacksAll = invData.Items.filter(it => !it._debug).length;
+
+  let html = `<div style="padding:12px 18px;">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:14px;">
+      <strong style="color:var(--text);">${totalLocations}</strong> storage locations in use · <strong style="color:var(--text);">${totalStacksAll}</strong> total stacks · <strong style="color:var(--text);">${zoneOrder.length}</strong> zones
+    </div>`;
+
+  for (const [zone, zd] of zoneOrder) {
+    html += `<div style="margin-bottom:18px;">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border-dim);">
+        <span style="color:var(--gold);font-size:15px;font-weight:700;">${esc(zone)}</span>
+        <span style="color:var(--text-dim);font-size:11px;">${zd.totalStacks}${zd.hasCapacity ? '/' + zd.totalCapacity : ''} stacks · ${zd.totalItems.toLocaleString()} items · <span style="color:var(--gold);">${zd.totalValue.toLocaleString()}c</span></span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">`;
+
+    for (const { vk, info } of zd.vaults) {
+      const name = friendlyVault(vk);
+      const cd = info.capData; // { slots, max, favor } or null
+      const cap = cd ? cd.slots : 0;
+      const pct = cap ? Math.min(100, Math.round((info.stacks / cap) * 100)) : 0;
+      const barColor = pct < 50 ? '#5fcaaa' : pct < 80 ? '#c8a84b' : '#c04040';
+      const capLabel = cap ? `${info.stacks}/${cap}` : `${info.stacks}`;
+      const favorNote = cd && cd.favor ? ` <span style="color:${FAVOR_COLOR[cd.favor] || 'var(--text-dim)'};font-size:10px;font-weight:400;">${esc(cd.favor)}</span>` : '';
+      const maxNote = cd && cd.favor && cd.slots < cd.max ? ` <span style="color:var(--text-dim);font-size:10px;font-weight:400;">(max ${cd.max})</span>` : '';
+
+      html += `<div style="background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px 16px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="color:var(--text);font-size:13px;font-weight:600;">${esc(name)}${favorNote}</span>
+          <span style="font-size:12px;font-weight:700;color:${cap ? barColor : 'var(--text-dim)'};">${capLabel}${maxNote}</span>
+        </div>
+        ${cap ? `<div style="margin-top:6px;height:6px;background:var(--border-dim);border-radius:3px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px;transition:width .3s;"></div>
+        </div>` : ''}
+        <div style="margin-top:5px;display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);">
+          <span>${info.items.toLocaleString()} items</span>
+          <span style="color:var(--gold);">${info.totalValue.toLocaleString()}c</span>
+        </div>
+      </div>`;
+    }
+
+    html += `</div></div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+/* ── Duplicates sub-view ── */
+function renderInvDuplicatesView() {
+  let dupes = buildDuplicateItems();
+
+  if (invSearch.trim()) {
+    const terms = invSearch.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
+    dupes = dupes.filter(d => terms.some(t => d.nameLower.includes(t)));
+  }
+
+  const totalDupeStacks = dupes.reduce((s, d) => s + d.locations.length - 1, 0);
+
+  let html = `<div style="padding:6px 18px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border-dim);">
+    Found <strong style="color:var(--text);">${dupes.length}</strong> items stored in multiple locations · <strong style="color:var(--text);">${totalDupeStacks}</strong> extra stacks that could be consolidated
+  </div>`;
+
+  if (!dupes.length) {
+    html += `<div style="text-align:center;padding:40px 20px;color:var(--text-dim);font-size:13px;">No duplicate items found across storage locations.</div>`;
+    return html;
+  }
+
+  // Plan Consolidation Route button
+  html += `<div style="padding:10px 18px;text-align:center;">
+    <button onclick="toggleConsolidationRoute()" style="background:${_showConsolidationRoute ? 'rgba(200,168,75,.15)' : 'rgba(95,202,170,.12)'};border:2px solid ${_showConsolidationRoute ? 'var(--gold)' : '#5fcaaa'};color:${_showConsolidationRoute ? 'var(--gold)' : '#5fcaaa'};font-family:Georgia,serif;font-size:14px;font-weight:700;padding:10px 28px;border-radius:6px;cursor:pointer;letter-spacing:1px;">
+      ${_showConsolidationRoute ? '✕ Hide Route' : '🗺 Plan Consolidation Route'}
+    </button>
+  </div>`;
+
+  if (_showConsolidationRoute) {
+    html += renderConsolidationRoute();
+  }
+
+  html += `<div style="padding:8px 18px;">`;
+  for (const d of dupes) {
+    const wikiName = encodeURIComponent(d.name.replace(/ /g, '_'));
+    html += `<div style="background:var(--panel);border:1px solid var(--border-dim);border-radius:6px;padding:12px 16px;margin-bottom:8px;">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;">
+        <a href="https://wiki.projectgorgon.com/wiki/${wikiName}" target="_blank" rel="noopener" style="color:var(--gold);font-size:14px;font-weight:600;text-decoration:none;" onmouseenter="this.style.textDecoration='underline'" onmouseleave="this.style.textDecoration='none'">${esc(d.name)}</a>
+        <span style="color:var(--text-dim);font-size:11px;">${d.totalQty.toLocaleString()} total · ${d.locationCount} locations</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">`;
+    for (const loc of d.locations) {
+      html += `<span style="background:var(--bg);border:1px solid var(--border-dim);border-radius:4px;padding:3px 10px;font-size:12px;">
+        <span style="color:var(--text-dim);">${esc(loc.vault)}</span>
+        <span style="color:var(--gold);font-weight:600;margin-left:4px;">×${loc.qty}</span>
+      </span>`;
+    }
+    html += `</div></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+/* ── Consolidation Route Planner ── */
+let _showConsolidationRoute = false;
+
+function toggleConsolidationRoute() {
+  _showConsolidationRoute = !_showConsolidationRoute;
+  renderInventoryTab();
+}
+
+function buildConsolidationRoute() {
+  const dupes = buildDuplicateItems();
+  if (!dupes.length) return null;
+
+  const moves = [];
+
+  for (const d of dupes) {
+    const locs = d.locations.slice().sort((a, b) => b.qty - a.qty);
+    let targetIdx = locs.findIndex(l => !isPortableVault(l.vaultKey));
+    if (targetIdx === -1) targetIdx = 0;
+    const target = locs[targetIdx];
+    const targetZone = getZoneForVault(target.vaultKey) || (isPortableVault(target.vaultKey) ? 'On Person' : 'Unknown');
+
+    const pickups = [];
+    for (let i = 0; i < locs.length; i++) {
+      if (i === targetIdx) continue;
+      const loc = locs[i];
+      const srcZone = getZoneForVault(loc.vaultKey) || (isPortableVault(loc.vaultKey) ? 'On Person' : 'Unknown');
+      pickups.push({ vault: loc.vault, vaultKey: loc.vaultKey, zone: srcZone, qty: loc.qty, portable: isPortableVault(loc.vaultKey) });
+    }
+
+    moves.push({ name: d.name, nameLower: d.nameLower, target: { vault: target.vault, vaultKey: target.vaultKey, zone: targetZone, qty: target.qty }, pickups });
+  }
+
+  // First pass: collect all pickup zones so we can order them
+  const allPickupZones = new Set();
+  for (const m of moves) {
+    for (const p of m.pickups) {
+      if (!p.portable) allPickupZones.add(p.zone);
+    }
+    allPickupZones.add(m.target.zone);
+  }
+
+  // Build zone ordering for all involved zones
+  const zoneRankFn = z => {
+    const parent = typeof ZONE_PARENT !== 'undefined' ? ZONE_PARENT[z] : undefined;
+    let idx = ROUTE_ZONE_ORDER.indexOf(parent || z);
+    if (idx === -1) idx = 999;
+    if (parent && idx < 999) idx += 0.5;
+    return idx;
+  };
+
+  const stops = {};  // zone → { pickups: [], dropoffs: [] }
+  const ensureStop = z => { if (!stops[z]) stops[z] = { pickups: [], dropoffs: [] }; };
+
+  // Schedule all pickups
+  for (const m of moves) {
+    for (const p of m.pickups) {
+      if (p.portable) continue;
+      ensureStop(p.zone);
+      stops[p.zone].pickups.push({ name: m.name, qty: p.qty, vault: p.vault });
+    }
+  }
+
+  // Schedule ALL dropoffs at their target zones
+  for (const m of moves) {
+    const totalMoving = m.pickups.reduce((s, p) => s + p.qty, 0);
+    const portableQty = m.pickups.filter(p => p.portable).reduce((s, p) => s + p.qty, 0);
+    const nonPortablePickups = m.pickups.filter(p => !p.portable);
+    // Track last pickup zone for this item
+    let lastPickupZone = null;
+    let lastPickupRank = -1;
+    for (const p of nonPortablePickups) {
+      const r = zoneRankFn(p.zone);
+      if (r > lastPickupRank) { lastPickupRank = r; lastPickupZone = p.zone; }
+    }
+    ensureStop(m.target.zone);
+    stops[m.target.zone].dropoffs.push({ name: m.name, nameLower: m.nameLower, qty: totalMoving, vault: m.target.vault, portableQty, lastPickupZone });
+  }
+
+  // Sort zones in natural travel order
+  const orderedZones = Object.keys(stops)
+    .filter(z => stops[z].pickups.length || stops[z].dropoffs.length)
+    .sort((a, b) => zoneRankFn(a) - zoneRankFn(b));
+
+  // Build a set of which zones have been visited by each stop index,
+  // so the renderer knows which dropoffs are ready
+  const zoneVisitedByIdx = {};
+  orderedZones.forEach((z, i) => { zoneVisitedByIdx[z] = i; });
+
+  const slotsFreed = moves.reduce((s, m) => s + m.pickups.length, 0);
+  return { stops, orderedZones, moves, slotsFreed };
+}
+
+function renderConsolidationRoute() {
+  const route = buildConsolidationRoute();
+  if (!route || !route.orderedZones.length) return '<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px;">No consolidation route needed.</div>';
+
+  const zoneRankFn = z => {
+    const parent = typeof ZONE_PARENT !== 'undefined' ? ZONE_PARENT[z] : undefined;
+    let idx = ROUTE_ZONE_ORDER.indexOf(parent || z);
+    if (idx === -1) idx = 999;
+    if (parent && idx < 999) idx += 0.5;
+    return idx;
+  };
+
+  let html = `<div style="margin:0 18px 12px;padding:16px 20px;background:var(--panel);border:1px solid var(--border);border-radius:8px;">`;
+
+  html += `<div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border-dim);">
+    <strong style="color:var(--text);">${route.moves.length}</strong> items to consolidate · <strong style="color:var(--text);">${route.orderedZones.length}</strong> zone stops · <strong style="color:var(--gold);">${route.slotsFreed}</strong> inventory slots freed
+  </div>`;
+
+  // Pre-classify each dropoff: can it be delivered on the forward pass, or does it need a return trip?
+  // A dropoff at targetZone is "forward" if lastPickupZone rank <= targetZone rank (pickup happens first).
+  // Otherwise it's a "return trip" — player passes the target, then picks up later, must come back.
+  const returnTrips = []; // { dropoff, targetZone }
+
+  // Build filtered dropoff lists per zone (forward-pass only)
+  const forwardDropoffs = {}; // zone -> dropoff[]
+  for (const zone of route.orderedZones) {
+    forwardDropoffs[zone] = [];
+    for (const d of route.stops[zone].dropoffs) {
+      const lpZone = d.lastPickupZone;
+      if (!lpZone) {
+        // All pickups are portable (on person) — always ready
+        forwardDropoffs[zone].push(d);
+      } else {
+        const lpRank = zoneRankFn(lpZone);
+        const tgtRank = zoneRankFn(zone);
+        if (lpRank <= tgtRank) {
+          // Last pickup is at or before target zone — can drop off on forward pass
+          forwardDropoffs[zone].push(d);
+        } else {
+          // Last pickup is AFTER target zone — need a return trip
+          returnTrips.push({ dropoff: d, targetZone: zone });
+        }
+      }
+    }
+  }
+
+  let stopIdx = 0;
+  for (const zone of route.orderedZones) {
+    const data = route.stops[zone];
+    const pickups = data.pickups;
+    const dropoffs = forwardDropoffs[zone];
+
+    if (!pickups.length && !dropoffs.length) continue;
+    stopIdx++;
+
+    html += `<div style="margin-bottom:14px;">
+      <div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:6px;">Stop ${stopIdx} — ${esc(zone)}</div>`;
+
+    // Pickups
+    if (pickups.length) {
+      const byVault = {};
+      pickups.forEach(p => { if (!byVault[p.vault]) byVault[p.vault] = []; byVault[p.vault].push(p); });
+      for (const [vault, items] of Object.entries(byVault)) {
+        html += `<div style="margin-left:16px;margin-bottom:6px;padding:6px 12px;border-left:3px solid #5fcaaa;background:rgba(95,202,170,.06);border-radius:0 4px 4px 0;">
+          <div style="font-size:11px;color:#5fcaaa;font-weight:600;margin-bottom:3px;">📤 Pick up from ${esc(vault)}:</div>`;
+        for (const it of items) {
+          html += `<div style="font-size:12px;color:var(--text);padding:1px 0;">${esc(it.name)} <span style="color:var(--gold);font-weight:600;">×${it.qty}</span></div>`;
+        }
+        html += `</div>`;
+      }
+    }
+
+    // Dropoffs
+    if (dropoffs.length) {
+      const byVault = {};
+      dropoffs.forEach(d => { if (!byVault[d.vault]) byVault[d.vault] = []; byVault[d.vault].push(d); });
+      for (const [vault, items] of Object.entries(byVault)) {
+        html += `<div style="margin-left:16px;margin-bottom:6px;padding:6px 12px;border-left:3px solid var(--gold);background:rgba(200,168,75,.06);border-radius:0 4px 4px 0;">
+          <div style="font-size:11px;color:var(--gold);font-weight:600;margin-bottom:3px;">📥 Drop off at ${esc(vault)}:</div>`;
+        for (const it of items) {
+          let note = '';
+          if (it.portableQty > 0 && it.portableQty >= it.qty) note = ` <span style="color:var(--text-dim);font-size:11px;">(already carrying)</span>`;
+          else if (it.portableQty > 0) note = ` <span style="color:var(--text-dim);font-size:11px;">(${it.portableQty} already carrying)</span>`;
+          html += `<div style="font-size:12px;color:var(--text);padding:1px 0;">${esc(it.name)} <span style="color:var(--gold);font-weight:600;">×${it.qty}</span>${note}</div>`;
+        }
+        html += `</div>`;
+      }
+    }
+
+    html += `</div>`;
+  }
+
+  // Return trips — items whose target zone comes before their last pickup zone
+  if (returnTrips.length) {
+    const returnByZone = {};
+    for (const rt of returnTrips) {
+      if (!returnByZone[rt.targetZone]) returnByZone[rt.targetZone] = [];
+      returnByZone[rt.targetZone].push(rt.dropoff);
+    }
+    const returnZones = Object.keys(returnByZone).sort((a, b) => zoneRankFn(a) - zoneRankFn(b));
+    for (const zone of returnZones) {
+      stopIdx++;
+      html += `<div style="margin-bottom:14px;">
+        <div style="font-size:14px;font-weight:700;color:var(--gold);margin-bottom:6px;">Stop ${stopIdx} — ${esc(zone)} <span style="font-size:11px;color:var(--text-dim);font-weight:400;">(return trip)</span></div>`;
+      const byVault = {};
+      returnByZone[zone].forEach(d => { if (!byVault[d.vault]) byVault[d.vault] = []; byVault[d.vault].push(d); });
+      for (const [vault, items] of Object.entries(byVault)) {
+        html += `<div style="margin-left:16px;margin-bottom:6px;padding:6px 12px;border-left:3px solid var(--gold);background:rgba(200,168,75,.06);border-radius:0 4px 4px 0;">
+          <div style="font-size:11px;color:var(--gold);font-weight:600;margin-bottom:3px;">📥 Drop off at ${esc(vault)}:</div>`;
+        for (const it of items) {
+          let note = '';
+          if (it.portableQty > 0 && it.portableQty >= it.qty) note = ` <span style="color:var(--text-dim);font-size:11px;">(already carrying)</span>`;
+          else if (it.portableQty > 0) note = ` <span style="color:var(--text-dim);font-size:11px;">(${it.portableQty} already carrying)</span>`;
+          html += `<div style="font-size:12px;color:var(--text);padding:1px 0;">${esc(it.name)} <span style="color:var(--gold);font-weight:600;">×${it.qty}</span>${note}</div>`;
+        }
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+/* ── Favor Gifts sub-view ── */
+function renderInvGiftsView() {
+  if (!npcsData) {
+    return `<div style="text-align:center;padding:40px 20px;color:var(--text-dim);font-size:13px;">
+      NPC data not loaded yet. Please wait for game data to finish loading, or re-import your data from the <strong style="color:var(--gold);cursor:pointer;" onclick="showTab('imports')">Imports</strong> tab.
+    </div>`;
+  }
+
+  let gifts = buildGiftMatches();
+
+  if (invSearch.trim()) {
+    const terms = invSearch.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
+    gifts = gifts.filter(g => terms.some(t => g.npc.toLowerCase().includes(t) || g.item.toLowerCase().includes(t) || g.zone.toLowerCase().includes(t)));
+  }
+
+  // Sort gifts
+  gifts.sort((a, b) => {
+    let cmp = 0;
+    switch (invGiftSortKey) {
+      case 'npc':    cmp = a.npc.localeCompare(b.npc); break;
+      case 'zone':   cmp = a.zone.localeCompare(b.zone); break;
+      case 'favor':  cmp = (FAVOR_RANK[a.favor] ?? -1) - (FAVOR_RANK[b.favor] ?? -1); break;
+      case 'item':   cmp = a.item.localeCompare(b.item); break;
+      case 'desire': cmp = (a.desire === 'Love' ? 0 : 1) - (b.desire === 'Love' ? 0 : 1); break;
+      case 'qty':      cmp = a.qty - b.qty; break;
+      case 'location': cmp = (a.locations[0]?.vault || '').localeCompare(b.locations[0]?.vault || ''); break;
+    }
+    return cmp * invGiftSortDir;
+  });
+
+  const loveCount = gifts.filter(g => g.desire === 'Love').length;
+  const likeCount = gifts.filter(g => g.desire === 'Like').length;
+
+  let html = `<div style="padding:6px 18px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border-dim);">
+    Found <strong style="color:#e03040;">${loveCount} loved</strong> and <strong style="color:#5a8ade;">${likeCount} liked</strong> gift matches in your inventory
+    <span style="margin-left:12px;font-style:italic;">Gift preferences based on available game data and may be incomplete.</span>
+  </div>`;
+
+  if (!gifts.length) {
+    html += `<div style="text-align:center;padding:40px 20px;color:var(--text-dim);font-size:13px;">No gift matches found in your inventory${charData ? '' : ' — load character data to see favor levels'}.</div>`;
+    return html;
+  }
+
+  const giftCols = [
+    { key: 'npc',      label: 'NPC',        align: 'left',   w: 140 },
+    { key: 'zone',     label: 'Zone',       align: 'left',   w: 110 },
+    { key: 'favor',    label: 'Your Favor', align: 'left',   w: 100 },
+    { key: 'item',     label: 'Gift Item',  align: 'left',   w: 160 },
+    { key: 'desire',   label: 'Desire',     align: 'center', w: 60  },
+    { key: 'qty',      label: 'Qty',        align: 'right',  w: 50  },
+    { key: 'location', label: 'Stored In',  align: 'left',   w: 160 },
+  ];
+
+  html += `<div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr>`;
+  for (const c of giftCols) {
+    const isSorted = invGiftSortKey === c.key;
+    const arrow = isSorted ? (invGiftSortDir === 1 ? ' ▲' : ' ▼') : '';
+    html += `<th onclick="invSetGiftSort('${c.key}')" style="padding:8px 6px;text-align:${c.align};color:var(--gold);font-size:11px;font-weight:600;border-bottom:1px solid var(--border);width:${c.w}px;cursor:pointer;user-select:none;white-space:nowrap;">${c.label}${arrow}</th>`;
+  }
+  html += `</tr></thead><tbody>`;
+
+  for (const g of gifts) {
+    const npcWiki = encodeURIComponent(g.npc.replace(/ /g, '_'));
+    const itemWiki = encodeURIComponent(g.item.replace(/ /g, '_'));
+    const favorColor = g.favor ? (FAVOR_COLOR[g.favor] || 'var(--text-dim)') : 'var(--text-dim)';
+    const desireColor = g.desire === 'Love' ? '#e03040' : '#5a8ade';
+    const desireLabel = g.desire === 'Love' ? '❤ Love' : '👍 Like';
+
+    html += `<tr style="border-bottom:1px solid var(--border-dim);" onmouseenter="this.style.background='var(--row-hover)'" onmouseleave="this.style.background=''">
+      <td style="padding:6px;"><a href="https://wiki.projectgorgon.com/wiki/${npcWiki}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;" onmouseenter="this.style.color='var(--gold)'" onmouseleave="this.style.color='var(--text)'">${esc(g.npc)}</a></td>
+      <td style="padding:6px;color:var(--text-dim);font-size:12px;">${esc(g.zone)}</td>
+      <td style="padding:6px;font-size:12px;color:${favorColor};font-weight:600;">${g.favor ? esc(g.favor) : '—'}</td>
+      <td style="padding:6px;"><a href="https://wiki.projectgorgon.com/wiki/${itemWiki}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;" onmouseenter="this.style.color='var(--gold)'" onmouseleave="this.style.color='var(--text)'">${esc(g.item)}</a></td>
+      <td style="padding:6px;text-align:center;color:${desireColor};font-weight:bold;font-size:12px;">${desireLabel}</td>
+      <td style="padding:6px;text-align:right;font-size:12px;">${g.qty.toLocaleString()}</td>
+      <td style="padding:6px;font-size:11px;color:var(--text-dim);">${g.locations.map(l => esc(l.vault) + (l.qty > 1 ? ' <span style="color:var(--gold);">×' + l.qty + '</span>' : '')).join(', ')}</td>
+    </tr>`;
+  }
+
+  html += `</tbody></table></div>`;
+  return html;
+}
 
 /* ══════════════════════════════════════════════════════════════
    DEBUG MODE
@@ -1802,7 +2598,8 @@ window.debugFindNpc = function(search) {
 
 /* Convert StorageVault codes to readable names */
 function friendlyVault(v) {
-  if (!v || v === '?' || v === 'Saddlebag') return 'On Person';
+  if (!v || v === '?') return 'On Person';
+  if (v === 'Saddlebag') return 'Saddlebag';
   if (v.startsWith('NPC_'))             return v.slice(4);
   if (v.startsWith('*AccountStorage_')) return 'Transfer Storage (' + v.slice(16) + ')';
   // split CamelCase: SerbuleCommunityChest → Serbule Community Chest
@@ -1852,6 +2649,27 @@ const WO_COLS = [
   { key: 'contract', label: 'Contract',    sortable: true,  w: 90  },
 ];
 
+
+/* Inventory tab columns */
+const INV_COLS = [
+  { key: 'name',     label: 'Item',        sortable: true,  w: 220 },
+  { key: 'qty',      label: 'Qty',         sortable: true,  w: 60  },
+  { key: 'location', label: 'Storage',     sortable: true,  w: 160 },
+  { key: 'zone',     label: 'Zone',        sortable: true,  w: 120 },
+  { key: 'value',    label: 'Value (ea)',   sortable: true,  w: 90  },
+  { key: 'total',    label: 'Total Value',  sortable: true,  w: 100 },
+];
+
+/* Inventory tab state */
+let invTabView     = 'items';    // 'items' | 'storage' | 'duplicates' | 'gifts'
+let invSearch      = '';
+let invSortKey     = 'name';
+let invSortDir     = 1;
+let invVaultFilter = '';         // '' = all, or a specific vault key
+let invGiftSortKey = 'desire';
+let invGiftSortDir = 1;
+let invDupSortKey  = 'locations';
+let invDupSortDir  = -1;
 
 function loadInventoryJSON(jsonText) {
   try {
@@ -3562,6 +4380,9 @@ function saveFilterState() {
       inNeedHideCraftable, inNeedHideHaveAll, inNeedSortCol, inNeedSortDir,
       inNeedSubsMode, inNeedCopyMode, inNeedCopyIncludeVendors, inNeedCopyRemember,
       inNeedShowContractless, inNeedShowExcluded,
+      // Inventory tab state
+      invTabView, invSearch, invSortKey, invSortDir, invVaultFilter,
+      invGiftSortKey, invGiftSortDir, invDupSortKey, invDupSortDir,
       // Route planner preferences
       _routeNoCrafting, _routeNoPurchases,
       // Route planner session state (persisted until user clicks Reset)
@@ -3623,6 +4444,16 @@ function applyFilterState(s) {
   if (s.inNeedCopyRemember       != null) inNeedCopyRemember       = s.inNeedCopyRemember;
   if (s.inNeedShowContractless   != null) inNeedShowContractless   = s.inNeedShowContractless;
   if (s.inNeedShowExcluded       != null) inNeedShowExcluded       = s.inNeedShowExcluded;
+  // Inventory tab state
+  if (s.invTabView         != null) invTabView          = s.invTabView;
+  if (s.invSearch          != null) invSearch           = s.invSearch;
+  if (s.invSortKey         != null) invSortKey          = s.invSortKey;
+  if (s.invSortDir         != null) invSortDir          = s.invSortDir;
+  if (s.invVaultFilter     != null) invVaultFilter      = s.invVaultFilter;
+  if (s.invGiftSortKey     != null) invGiftSortKey      = s.invGiftSortKey;
+  if (s.invGiftSortDir     != null) invGiftSortDir      = s.invGiftSortDir;
+  if (s.invDupSortKey      != null) invDupSortKey       = s.invDupSortKey;
+  if (s.invDupSortDir      != null) invDupSortDir       = s.invDupSortDir;
   // Route planner preferences
   if (s._routeNoCrafting   != null) _routeNoCrafting    = s._routeNoCrafting;
   if (s._routeNoPurchases  != null) _routeNoPurchases   = s._routeNoPurchases;
@@ -7406,7 +8237,8 @@ function renderRouteHtml({ stops, orderedZones, craftJobs, incomplete }) {
 
 // isPortableVault used in renderRouteHtml — expose at module scope
 function isPortableVault(b) {
-  return b.vaultKey === '?' || b.vaultKey === 'Saddlebag' || !getZoneForVault(b.vaultKey);
+  const vk = (typeof b === 'string') ? b : b.vaultKey;
+  return vk === '?' || vk === 'Saddlebag' || !getZoneForVault(vk);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -9257,7 +10089,7 @@ function renderMissingRecipesTab() {
    Bug Report
    ═══════════════════════════════════════════════════════ */
 function submitBugReport() {
-  const ver = 'A1v5';
+  const ver = 'A1v6';
   const ua = navigator.userAgent;
   const scr = `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio}x)`;
   const vp = `${window.innerWidth}x${window.innerHeight}`;
