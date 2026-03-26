@@ -3194,14 +3194,30 @@ function canFullyFulfillRecipe(recipe, craftsNeeded, globalReserved) {
         continue;
       }
 
-      // Shortfall — look for usable sub-recipes (skill OK + known), prefer non-enchanted
+      // Shortfall — look for usable sub-recipes (skill OK + known)
+      // Sort: prefer recipes whose ingredients are in storage, then non-enchanted
       const shortfall  = needed - avail;
       const subRecipes = (craftableMap[ing.nameLower] || []).filter(r => r.resultNameLower === ing.nameLower);
-      // Sort: non-enchanted first, then enchanted
       const viableSubs = subRecipes.filter(r => {
         if ((charData.Skills?.[r.skill]?.Level ?? -1) < (r.skillLevel || 0)) return false;
         return _isRecipeKnown(r, known);
       }).sort((a, b) => {
+        // Score by ingredient availability: higher = more ingredients in storage
+        const scoreAvail = (rec) => {
+          if (!rec.ingredients || !rec.ingredients.length) return 0;
+          const subCrafts = Math.ceil(shortfall / (rec.resultQty || 1));
+          let haveAll = true, totalCoverage = 0;
+          for (const si of rec.ingredients) {
+            if (si.isDynamic) continue;
+            const siNeeded = si.qty * subCrafts;
+            const siAvail  = getAvail(si.nameLower);
+            if (siAvail < siNeeded) haveAll = false;
+            totalCoverage += Math.min(siAvail / (siNeeded || 1), 1);
+          }
+          return (haveAll ? 1000 : 0) + totalCoverage;
+        };
+        const diff = scoreAvail(b) - scoreAvail(a);
+        if (Math.abs(diff) > 0.01) return diff > 0 ? 1 : -1;
         const aE = ((a.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         const bE = ((b.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         return aE - bE;
@@ -3390,13 +3406,29 @@ function buildCraftPlan(recipe, craftsNeeded, globalReserved) {
       }
 
       // Shortfall — find sub-recipe
+      // Sort: prefer recipes whose ingredients are in storage, then non-enchanted
       const shortfall = needed - avail;
-      // Sort viable sub-recipes: prefer non-enchanted
       const subRecipes = (craftableMap[ing.nameLower] || []).filter(r => r.resultNameLower === ing.nameLower);
       const viableSubs = subRecipes.filter(r => {
         if ((charData.Skills?.[r.skill]?.Level ?? -1) < (r.skillLevel || 0)) return false;
         return _isRecipeKnown(r, known);
       }).sort((a, b) => {
+        // Score by ingredient availability: higher = more ingredients in storage
+        const scoreAvail = (rec) => {
+          if (!rec.ingredients || !rec.ingredients.length) return 0;
+          const subCrafts = Math.ceil(shortfall / (rec.resultQty || 1));
+          let haveAll = true, totalCoverage = 0;
+          for (const si of rec.ingredients) {
+            if (si.isDynamic) continue;
+            const siNeeded = si.qty * subCrafts;
+            const siAvail  = getAvail(si.nameLower);
+            if (siAvail < siNeeded) haveAll = false;
+            totalCoverage += Math.min(siAvail / (siNeeded || 1), 1);
+          }
+          return (haveAll ? 1000 : 0) + totalCoverage;
+        };
+        const diff = scoreAvail(b) - scoreAvail(a);
+        if (Math.abs(diff) > 0.01) return diff > 0 ? 1 : -1;
         const aE = ((a.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         const bE = ((b.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         return aE - bE;
@@ -7027,9 +7059,25 @@ function buildRouteData(rows) {
     // ── Can craft with vendor-purchased ingredients ─────────────────────────
     if (!_routeNoCrafting && !_routeAbandonedCrafts.has(r.nl) && (craftStatus === 'green' || craftStatus === 'gold') && invData && charData) {
       const _recipesRaw = (craftableMap[r.nl] || []).filter(rec => rec.resultNameLower === r.nl);
-      // Sort: prefer non-enchanted unless the WO itself calls for (enchanted)
+      // Sort: prefer recipes with more ingredients in storage, then non-enchanted
       const _isEnchWO = r.nl.includes('(enchanted)');
       const _recipes = _recipesRaw.slice().sort((a, b) => {
+        // Prefer recipes whose ingredients are more available in storage
+        const scoreAvail = (rec) => {
+          if (!rec.ingredients || !rec.ingredients.length) return 0;
+          const crafts = Math.ceil(_craftQty / (rec.resultQty || 1));
+          let haveAll = true, totalCoverage = 0;
+          for (const si of rec.ingredients) {
+            if (si.isDynamic) continue;
+            const siNeeded = si.qty * crafts;
+            const siAvail  = adjTotal(si.nameLower);
+            if (siAvail < siNeeded) haveAll = false;
+            totalCoverage += Math.min(siAvail / (siNeeded || 1), 1);
+          }
+          return (haveAll ? 1000 : 0) + totalCoverage;
+        };
+        const diff = scoreAvail(b) - scoreAvail(a);
+        if (Math.abs(diff) > 0.01) return diff > 0 ? 1 : -1;
         const aEnch = ((a.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         const bEnch = ((b.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         return _isEnchWO ? (bEnch - aEnch) : (aEnch - bEnch);
@@ -8783,6 +8831,22 @@ function buildQuestRouteData(rows) {
     if (!_routeNoCrafting && (craftStatus === 'green' || craftStatus === 'gold') && invData && charData) {
       const _recipesRaw = (craftableMap[nl] || []).filter(rec => rec.resultNameLower === nl);
       const _recipes = _recipesRaw.slice().sort((a, b) => {
+        // Prefer recipes whose ingredients are more available in storage
+        const scoreAvail = (rec) => {
+          if (!rec.ingredients || !rec.ingredients.length) return 0;
+          const crafts = Math.ceil(_craftQty / (rec.resultQty || 1));
+          let haveAll = true, totalCoverage = 0;
+          for (const si of rec.ingredients) {
+            if (si.isDynamic) continue;
+            const siNeeded = si.qty * crafts;
+            const siAvail  = adjTotal(si.nameLower);
+            if (siAvail < siNeeded) haveAll = false;
+            totalCoverage += Math.min(siAvail / (siNeeded || 1), 1);
+          }
+          return (haveAll ? 1000 : 0) + totalCoverage;
+        };
+        const diff = scoreAvail(b) - scoreAvail(a);
+        if (Math.abs(diff) > 0.01) return diff > 0 ? 1 : -1;
         const aEnch = ((a.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         const bEnch = ((b.recipeName || '').toLowerCase().includes('enchanted')) ? 1 : 0;
         return aEnch - bEnch;
